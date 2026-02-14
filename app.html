@@ -494,13 +494,34 @@
 
         // Run OCR
         async function runOCR() {
-            document.getElementById('extracted-text').textContent = '🔍 Running OCR...';
+            document.getElementById('extracted-text').textContent = '🔍 Running OCR... (this may take 30-60 seconds)';
             try {
-                const { data: { text } } = await Tesseract.recognize(currentFile, 'eng');
-                extractedContent = text;
-                document.getElementById('extracted-text').textContent = text;
-                detectAndAddMappings(text);
+                // Convert file to data URL for Tesseract
+                const reader = new FileReader();
+                reader.onload = async (e) => {
+                    try {
+                        // Use Tesseract v5 API correctly
+                        if (typeof Tesseract === 'undefined') {
+                            throw new Error('Tesseract.js library not loaded. Try refreshing the page.');
+                        }
+                        
+                        const result = await Tesseract.recognize(
+                            e.target.result,
+                            'eng',
+                            { logger: (m) => console.log('OCR Progress:', m) }
+                        );
+                        
+                        extractedContent = result.data.text;
+                        document.getElementById('extracted-text').textContent = extractedContent;
+                        detectAndAddMappings(extractedContent);
+                    } catch (error) {
+                        console.error('OCR Error:', error);
+                        document.getElementById('extracted-text').textContent = '❌ OCR Error: ' + (error.message || 'Unknown error occurred');
+                    }
+                };
+                reader.readAsDataURL(currentFile);
             } catch (error) {
+                console.error('OCR Setup Error:', error);
                 document.getElementById('extracted-text').textContent = '❌ OCR Error: ' + error.message;
             }
         }

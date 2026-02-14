@@ -22,7 +22,7 @@ class Settings:
     # App
     SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-key")
     DEBUG = os.getenv("DEBUG", "True").lower() == "true"
-    CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:5173").split(",")
+    CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:5173,http://localhost:8080").split(",")
     
     # File Upload
     MAX_FILE_SIZE = int(os.getenv("MAX_FILE_SIZE", "52428800"))  # 50MB

@@ -24,6 +24,7 @@
         .progress-bar { width: 100%; height: 8px; background: #E5E7EB; border-radius: 4px; overflow: hidden; }
         .progress-fill { height: 100%; background: linear-gradient(90deg, #3B82F6, #8B5CF6); width: 0%; transition: width 0.3s; }
         .template-tag { display: inline-block; background: #3B82F6; color: white; padding: 4px 8px; border-radius: 4px; font-size: 12px; margin: 2px; }
+        #preview-container img, #preview-container canvas { transform-origin: center; transition: transform 0.2s ease; max-width: 100%; }
     </style>
 </head>
 <body class="bg-gradient-to-br from-slate-50 to-slate-100">
@@ -112,7 +113,17 @@
                 <!-- Document Preview -->
                 <div class="bg-white rounded-lg shadow p-6">
                     <h3 class="text-lg font-bold mb-4">📄 Preview</h3>
-                    <div id="preview-container" class="bg-gray-100 rounded p-4 flex items-center justify-center" style="min-height: 400px;">
+                    
+                    <!-- Zoom Controls -->
+                    <div class="flex gap-2 mb-4 items-center">
+                        <button onclick="zoomOut()" class="bg-gray-600 text-white px-3 py-1 rounded hover:bg-gray-700 transition text-sm">🔍- Zoom Out</button>
+                        <button onclick="resetZoom()" class="bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700 transition text-sm">↔️ Fit</button>
+                        <button onclick="zoomIn()" class="bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700 transition text-sm">🔍+ Zoom In</button>
+                        <span id="zoom-level" class="text-sm font-bold text-gray-700 ml-2">100%</span>
+                    </div>
+                    
+                    <!-- Image/PDF Container with Scrolling -->
+                    <div id="preview-container" class="bg-gray-100 rounded p-4 flex items-center justify-center overflow-auto" style="min-height: 500px; cursor: grab;">
                         <div class="spinner"></div>
                     </div>
                 </div>
@@ -359,6 +370,29 @@
             }
         }
 
+        // Zoom and Pan Functions
+        let currentZoom = 1;
+        function zoomIn() {
+            currentZoom += 0.2;
+            applyZoom();
+        }
+        function zoomOut() {
+            if (currentZoom > 0.3) currentZoom -= 0.2;
+            applyZoom();
+        }
+        function resetZoom() {
+            currentZoom = 1;
+            applyZoom();
+        }
+        function applyZoom() {
+            const container = document.getElementById('preview-container');
+            const img = container.querySelector('img');
+            const canvas = container.querySelector('canvas');
+            if (img) img.style.transform = `scale(${currentZoom})`;
+            if (canvas) canvas.style.transform = `scale(${currentZoom})`;
+            document.getElementById('zoom-level').textContent = Math.round(currentZoom * 100) + '%';
+        }
+
         // Mode Selection
         function selectMode(mode) {
             currentMode = mode;
@@ -419,10 +453,13 @@
             const viewport = page.getViewport({ scale: 1.5 });
             canvas.width = viewport.width;
             canvas.height = viewport.height;
+            canvas.style.transformOrigin = 'center';
             await page.render({ canvasContext: context, viewport: viewport }).promise;
             
             document.getElementById('preview-container').innerHTML = '';
             document.getElementById('preview-container').appendChild(canvas);
+            currentZoom = 1;
+            document.getElementById('zoom-level').textContent = '100%';
 
             const textContent = await page.getTextContent();
             extractedContent = textContent.items.map(item => item.str).join(' ');
@@ -436,8 +473,12 @@
                 const img = document.createElement('img');
                 img.src = e.target.result;
                 img.style.maxWidth = '100%';
+                img.style.height = 'auto';
+                img.style.transformOrigin = 'center';
                 document.getElementById('preview-container').innerHTML = '';
                 document.getElementById('preview-container').appendChild(img);
+                currentZoom = 1;
+                document.getElementById('zoom-level').textContent = '100%';
                 extractedContent = '[Image loaded]';
                 document.getElementById('extracted-text').textContent = 'Image file selected. Use OCR mode or manually highlight fields.';
             };

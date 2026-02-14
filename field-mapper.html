@@ -1,0 +1,736 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Invoice Field Mapper - Map to Epicor BAQ</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto; }
+        .fade-in { animation: fadeIn 0.5s ease-in; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .highlight-area { 
+            position: relative; 
+            cursor: text-select; 
+            border: 2px dashed #3B82F6;
+            padding: 8px;
+            margin: 4px;
+            border-radius: 4px;
+            user-select: text;
+        }
+        .highlight-area:hover { background: rgba(59, 130, 246, 0.05); }
+        .highlight-selected { 
+            background: rgba(59, 130, 246, 0.2); 
+            border-color: #1E40AF;
+        }
+        .field-tag {
+            display: inline-block;
+            background: #3B82F6;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            margin: 2px;
+            cursor: pointer;
+        }
+        .field-tag:hover { background: #1E40AF; }
+        .field-mapping-row {
+            border: 1px solid #E5E7EB;
+            border-radius: 6px;
+            padding: 12px;
+            margin: 8px 0;
+            background: white;
+        }
+        .field-mapping-row.active { background: #EFF6FF; border-color: #3B82F6; }
+        .preview-image { max-width: 100%; max-height: 600px; border: 1px solid #E5E7EB; border-radius: 4px; }
+        .pdf-canvas { border: 1px solid #E5E7EB; margin: 10px 0; }
+        .spinner { border: 3px solid rgba(59, 130, 246, 0.1); border-top: 3px solid #3B82F6; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .extracted-text { 
+            background: #F3F4F6; 
+            padding: 12px; 
+            border-radius: 4px; 
+            font-family: monospace; 
+            font-size: 12px; 
+            max-height: 300px; 
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        .mapping-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 16px;
+            border-radius: 8px;
+            margin: 8px 0;
+        }
+        .baq-field-selector {
+            background: white;
+            border: 2px solid #E5E7EB;
+            border-radius: 6px;
+            padding: 12px;
+            margin: 8px 0;
+        }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-slate-50 to-slate-100">
+    <!-- Navigation -->
+    <nav class="bg-white shadow-md sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between items-center h-16">
+                <div class="flex items-center gap-3">
+                    <div class="text-3xl">🗂️</div>
+                    <h1 class="text-2xl font-bold text-blue-600">Invoice Field Mapper</h1>
+                </div>
+                <div class="text-sm text-gray-600">Map invoice fields to Epicor BAQ</div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        
+        <!-- Mode Selection -->
+        <div class="bg-white rounded-lg shadow p-6 mb-6">
+            <h2 class="text-2xl font-bold mb-4">🔧 Processing Mode</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div onclick="selectMode('mapper')" id="mode-mapper" class="border-2 border-blue-300 rounded-lg p-6 cursor-pointer hover:shadow-lg transition bg-blue-50">
+                    <div class="text-4xl mb-3">🗂️</div>
+                    <h3 class="text-xl font-bold mb-2">Field Mapper</h3>
+                    <p class="text-gray-600 text-sm mb-3">Manually select and map fields from your invoice to Epicor BAQ fields. Best for:</p>
+                    <ul class="text-sm text-gray-700 space-y-1">
+                        <li>✓ Structured PDFs</li>
+                        <li>✓ Excel files</li>
+                        <li>✓ CSV exports</li>
+                        <li>✓ Well-formatted documents</li>
+                    </ul>
+                </div>
+                
+                <div onclick="selectMode('ocr')" id="mode-ocr" class="border-2 border-gray-300 rounded-lg p-6 cursor-pointer hover:shadow-lg transition hover:border-purple-300">
+                    <div class="text-4xl mb-3">🤖</div>
+                    <h3 class="text-xl font-bold mb-2">OCR + AI Extract</h3>
+                    <p class="text-gray-600 text-sm mb-3">Automatically extract text and intelligently identify fields. Best for:</p>
+                    <ul class="text-sm text-gray-700 space-y-1">
+                        <li>✓ Scanned images</li>
+                        <li>✓ Handwritten notes</li>
+                        <li>✓ Poor quality PDFs</li>
+                        <li>✓ Different invoice layouts</li>
+                    </ul>
+                </div>
+            </div>
+            <div id="mode-indicator" class="mt-4 p-3 bg-gray-100 rounded text-center text-gray-600">
+                👈 Select a processing mode to get started
+            </div>
+        </div>
+
+        <!-- Step 1: Upload -->
+        <div class="bg-white rounded-lg shadow p-6 mb-6">
+            <h2 class="text-2xl font-bold mb-4">📤 Step 1: Upload Invoice</h2>
+            <div class="border-2 border-dashed border-blue-300 rounded-lg p-8 text-center bg-blue-50 cursor-pointer hover:border-blue-500 transition" onclick="document.getElementById('file-input').click()">
+                <input type="file" id="file-input" accept=".pdf,.xlsx,.xls,.jpg,.png,.jpeg,.webp,.txt,.csv" onchange="handleFileUpload(event)" style="display:none;">
+                <div class="text-5xl mb-3">📁</div>
+                <h3 class="text-xl font-bold text-gray-800 mb-2">Drop your invoice file</h3>
+                <p class="text-gray-600">Supports: PDF, Excel, Images (JPG, PNG), TXT, CSV</p>
+                <p class="text-sm text-gray-500 mt-3" id="file-status">Select a file to start</p>
+            </div>
+        </div>
+
+        <div id="processing-section" class="hidden">
+            <!-- Step 2: Preview & Extract -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+                <!-- Left: Document Preview -->
+                <div class="bg-white rounded-lg shadow p-6">
+                    <h3 class="text-xl font-bold mb-4">📄 Document Preview</h3>
+                    <div id="preview-container" class="bg-gray-100 rounded p-4 flex items-center justify-center" style="min-height: 400px;">
+                        <div class="spinner"></div>
+                    </div>
+                    <div class="mt-4 flex gap-2">
+                        <button id="prev-page-btn" onclick="goToPreviousPage()" class="flex-1 bg-gray-600 text-white py-2 px-4 rounded hover:bg-gray-700 transition" style="display:none;">
+                            ← Previous Page
+                        </button>
+                        <span id="page-info" class="flex-1 text-center py-2"></span>
+                        <button id="next-page-btn" onclick="goToNextPage()" class="flex-1 bg-gray-600 text-white py-2 px-4 rounded hover:bg-gray-700 transition" style="display:none;">
+                            Next Page →
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Right: Extracted Text -->
+                <div class="bg-white rounded-lg shadow p-6">
+                    <h3 class="text-xl font-bold mb-4">📋 Extracted Text</h3>
+                    <div id="extracted-text-container" class="extracted-text">
+                        Loading content...
+                    </div>
+                    <button onclick="selectAllText()" class="mt-4 w-full bg-blue-600 text-white py-2 px-4 rounded hover:bg-blue-700 transition">
+                        ✓ Select All Text
+                    </button>
+                </div>
+            </div>
+
+            <!-- Step 3: Field Mapping -->
+            <div class="bg-white rounded-lg shadow p-6 mb-6">
+                <h3 class="text-xl font-bold mb-4">🎯 Step 2: Map Fields to Epicor BAQ</h3>
+                <p class="text-gray-600 mb-6">Select invoice fields and map them to your Epicor BAQ fields</p>
+                
+                <!-- Epicor BAQ Fields Reference -->
+                <div class="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                    <h4 class="font-bold text-blue-900 mb-3">📊 Available Epicor BAQ Fields:</h4>
+                    <div class="grid grid-cols-2 md:grid-cols-3 gap-2">
+                        <span class="field-tag cursor-default">invoice_number</span>
+                        <span class="field-tag cursor-default">invoice_date</span>
+                        <span class="field-tag cursor-default">vendor_name</span>
+                        <span class="field-tag cursor-default">vendor_id</span>
+                        <span class="field-tag cursor-default">po_number</span>
+                        <span class="field-tag cursor-default">invoice_amount</span>
+                        <span class="field-tag cursor-default">line_amount</span>
+                        <span class="field-tag cursor-default">description</span>
+                        <span class="field-tag cursor-default">line_number</span>
+                        <span class="field-tag cursor-default">quantity</span>
+                        <span class="field-tag cursor-default">unit_price</span>
+                        <span class="field-tag cursor-default">tax_amount</span>
+                    </div>
+                </div>
+
+                <!-- Field Mapping Interface -->
+                <div id="field-mappings" class="space-y-4">
+                    <!-- Mappings will be added here dynamically -->
+                </div>
+
+                <!-- Add New Mapping -->
+                <button onclick="addFieldMapping()" class="mt-6 w-full bg-green-600 text-white py-3 px-4 rounded-lg hover:bg-green-700 transition font-bold text-lg">
+                    + Add Field Mapping
+                </button>
+            </div>
+
+            <!-- OCR Results Section (Hidden by default) -->
+            <div id="ocr-results-section" class="hidden">
+                <div class="bg-white rounded-lg shadow p-6 mb-6">
+                    <h3 class="text-xl font-bold mb-4">🔍 OCR Results</h3>
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <div>
+                            <h4 class="font-bold mb-2">Raw OCR Text:</h4>
+                            <div id="ocr-raw-text" class="extracted-text text-xs"></div>
+                        </div>
+                        <div>
+                            <h4 class="font-bold mb-2">Detected Fields:</h4>
+                            <div id="ocr-detected-fields" class="space-y-2"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-lg shadow p-6 mb-6">
+                    <h3 class="text-xl font-bold mb-4">📊 Review & Confirm Extracted Fields</h3>
+                    <div id="ocr-field-review" class="space-y-3 mb-6">
+                        <!-- Confirmed fields will appear here -->
+                    </div>
+                    <div class="flex gap-3">
+                        <button onclick="resetOCR()" class="flex-1 bg-gray-600 text-white py-3 px-4 rounded-lg hover:bg-gray-700 transition font-bold">
+                            🔄 Reset
+                        </button>
+                        <button onclick="applyOCRExtraction()" class="flex-1 bg-green-600 text-white py-3 px-4 rounded-lg hover:bg-green-700 transition font-bold">
+                            🚀 Use These Fields
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 4: Review & Save -->
+            <div class="bg-white rounded-lg shadow p-6">
+                <h3 class="text-xl font-bold mb-4">✅ Step 3: Review & Save Mapping</h3>
+                <div id="mapping-summary" class="bg-gray-50 rounded p-4 mb-6 min-h-32">
+                    <p class="text-gray-600">No mappings created yet</p>
+                </div>
+                <div class="flex gap-3">
+                    <button onclick="saveMappingTemplate()" class="flex-1 bg-blue-600 text-white py-3 px-4 rounded-lg hover:bg-blue-700 transition font-bold">
+                        💾 Save Template
+                    </button>
+                    <button onclick="applyMappingAndExtract()" class="flex-1 bg-green-600 text-white py-3 px-4 rounded-lg hover:bg-green-700 transition font-bold">
+                        🚀 Extract & Match
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for Mapping Configuration -->
+    <div id="mapping-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-lg shadow-xl p-8 max-w-md w-full mx-4">
+            <h3 class="text-2xl font-bold mb-4">Configure Field Mapping</h3>
+            
+            <div class="mb-4">
+                <label class="block font-bold mb-2">Invoice Field (from document):</label>
+                <input type="text" id="modal-invoice-field" placeholder="e.g., Invoice # 12345" class="w-full border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-600">
+                <p class="text-xs text-gray-600 mt-1">Or select from extracted text and it will auto-populate</p>
+            </div>
+
+            <div class="mb-6">
+                <label class="block font-bold mb-2">Epicor BAQ Field:</label>
+                <select id="modal-baq-field" class="w-full border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-600">
+                    <option value="">Select BAQ Field...</option>
+                    <option value="invoice_number">invoice_number</option>
+                    <option value="invoice_date">invoice_date</option>
+                    <option value="vendor_name">vendor_name</option>
+                    <option value="vendor_id">vendor_id</option>
+                    <option value="po_number">po_number</option>
+                    <option value="invoice_amount">invoice_amount</option>
+                    <option value="line_amount">line_amount</option>
+                    <option value="description">description</option>
+                    <option value="line_number">line_number</option>
+                    <option value="quantity">quantity</option>
+                    <option value="unit_price">unit_price</option>
+                    <option value="tax_amount">tax_amount</option>
+                </select>
+            </div>
+
+            <div class="mb-6">
+                <label class="block font-bold mb-2">Extraction Pattern (Regex):</label>
+                <textarea id="modal-regex-pattern" placeholder="e.g., Invoice[#:\\s]*([A-Z0-9-]+)" class="w-full border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-600 h-24" spellcheck="false"></textarea>
+                <p class="text-xs text-gray-600 mt-1">Leave empty for exact match</p>
+            </div>
+
+            <div class="flex gap-3">
+                <button onclick="closeModal()" class="flex-1 bg-gray-600 text-white py-2 px-4 rounded hover:bg-gray-700 transition">
+                    Cancel
+                </button>
+                <button onclick="saveMapping()" class="flex-1 bg-blue-600 text-white py-2 px-4 rounded hover:bg-blue-700 transition">
+                    Save Mapping
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Global state
+        let currentFile = null;
+        let extractedContent = '';
+        let currentPdfDoc = null;
+        let currentPage = 1;
+        let fieldMappings = [];
+        let processingMode = null;
+        let ocrResults = {};
+
+        const API_URL = 'http://localhost:8000/api';
+        const BAQ_FIELDS = [
+            'invoice_number', 'invoice_date', 'vendor_name', 'vendor_id',
+            'po_number', 'invoice_amount', 'line_amount', 'description',
+            'line_number', 'quantity', 'unit_price', 'tax_amount'
+        ];
+
+        // Select Processing Mode
+        function selectMode(mode) {
+            processingMode = mode;
+            document.getElementById('mode-mapper').classList.toggle('bg-blue-50', mode === 'mapper');
+            document.getElementById('mode-mapper').classList.toggle('border-blue-300', mode === 'mapper');
+            document.getElementById('mode-mapper').classList.toggle('border-gray-300', mode !== 'mapper');
+            
+            document.getElementById('mode-ocr').classList.toggle('bg-purple-50', mode === 'ocr');
+            document.getElementById('mode-ocr').classList.toggle('border-purple-300', mode === 'ocr');
+            document.getElementById('mode-ocr').classList.toggle('border-gray-300', mode !== 'ocr');
+
+            const indicator = document.getElementById('mode-indicator');
+            if (mode === 'mapper') {
+                indicator.textContent = '✅ Field Mapper selected - Manually select and map invoice fields';
+                indicator.className = 'mt-4 p-3 bg-blue-100 rounded text-center text-blue-900 font-bold';
+            } else {
+                indicator.textContent = '✅ OCR + AI Extract selected - Upload scanned image or complex PDF for automatic extraction';
+                indicator.className = 'mt-4 p-3 bg-purple-100 rounded text-center text-purple-900 font-bold';
+            }
+        }
+
+        // Run OCR on image/document
+        async function runOCR() {
+            const previewContainer = document.getElementById('preview-container');
+            previewContainer.innerHTML = '<div class="flex flex-col items-center gap-4"><div class="spinner"></div><p>🔍 Running OCR and extracting text...</p></div>';
+
+            try {
+                // Get image from canvas or use original
+                let imageData;
+                if (currentFile.type.includes('image')) {
+                    imageData = await currentFile.arrayBuffer();
+                } else if (currentFile.type === 'application/pdf') {
+                    // Convert first PDF page to image
+                    const page = await currentPdfDoc.getPage(1);
+                    const canvas = document.createElement('canvas');
+                    const context = canvas.getContext('2d');
+                    const viewport = page.getViewport({ scale: 2 });
+                    canvas.width = viewport.width;
+                    canvas.height = viewport.height;
+                    await page.render({ canvasContext: context, viewport: viewport }).promise;
+                    imageData = canvas.toDataURL('image/png');
+                }
+
+                // Run Tesseract OCR
+                const { data: { text } } = await Tesseract.recognize(imageData, 'eng', {
+                    logger: (m) => {
+                        if (m.status === 'recognizing text') {
+                            const progress = Math.round(m.progress * 100);
+                            previewContainer.innerHTML = `<div class="flex flex-col items-center gap-4"><div class="spinner"></div><p>🔍 OCR Progress: ${progress}%</p></div>`;
+                        }
+                    }
+                });
+
+                ocrResults.rawText = text;
+                displayOCRResults(text);
+            } catch (error) {
+                previewContainer.innerHTML = `<p class="text-red-600">❌ OCR Error: ${error.message}</p>`;
+            }
+        }
+
+        // Display OCR results
+        function displayOCRResults(ocrText) {
+            document.getElementById('ocr-results-section').classList.remove('hidden');
+            document.getElementById('ocr-raw-text').textContent = ocrText;
+
+            // AI-powered field detection
+            const detectedFields = detectFieldsFromOCR(ocrText);
+            ocrResults.detectedFields = detectedFields;
+
+            // Display detected fields
+            const fieldsContainer = document.getElementById('ocr-detected-fields');
+            fieldsContainer.innerHTML = Object.entries(detectedFields)
+                .map(([field, value]) => `
+                    <div class="bg-green-50 border border-green-200 rounded p-3">
+                        <p class="font-bold text-green-900">${field}</p>
+                        <p class="text-sm text-gray-700 break-words">${value || '(not found)'}</p>
+                    </div>
+                `).join('');
+
+            // Display review section
+            const reviewContainer = document.getElementById('ocr-field-review');
+            reviewContainer.innerHTML = Object.entries(detectedFields)
+                .map(([baqField, value]) => `
+                    <div class="field-mapping-row active">
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-bold text-gray-700 mb-1">Epicor Field:</label>
+                                <div class="bg-purple-50 p-2 rounded text-sm font-mono">${baqField}</div>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-bold text-gray-700 mb-1">Detected Value:</label>
+                                <input type="text" class="w-full border rounded px-2 py-1 text-sm" value="${value}" data-field="${baqField}">
+                            </div>
+                        </div>
+                    </div>
+                `).join('');
+        }
+
+        // AI-powered field detection from OCR text
+        function detectFieldsFromOCR(text) {
+            const detected = {};
+
+            // Common patterns
+            const patterns = {
+                invoice_number: /(?:invoice|inv|bill|#|no\.?)\s*[#:]?\s*([A-Z0-9\-\/]+)/i,
+                invoice_date: /(?:date|invoice date|dated|d\.?o\.?\s*s\.?|issue date)\s*[:\-]?\s*(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/i,
+                vendor_name: /(?:from|vendor|supplier|company|bill from)\s*[:\-]?\s*([A-Z][A-Za-z\s&.,]*)/i,
+                po_number: /(?:p\.?o\.?|purchase order|po #?|order #)\s*[:\-]?\s*([A-Z0-9\-\/]+)/i,
+                invoice_amount: /(?:total|amount|grand total|total due)\s*[:\-]?\s*\$?\s*([\d,]+\.?\d*)/i,
+                tax_amount: /(?:tax|tax amount|sales tax|vat)\s*[:\-]?\s*\$?\s*([\d,]+\.?\d*)/i,
+                description: /(?:description|item|product|details)\s*[:\-]?\s*([A-Za-z0-9\s\-,\.]*)/i
+            };
+
+            Object.entries(patterns).forEach(([field, pattern]) => {
+                const match = text.match(pattern);
+                if (match) {
+                    detected[field] = match[1].trim();
+                }
+            });
+
+            return detected;
+        }
+
+        // Apply OCR extraction
+        async function applyOCRExtraction() {
+            const reviewInputs = document.querySelectorAll('#ocr-field-review input[data-field]');
+            fieldMappings = [];
+
+            reviewInputs.forEach(input => {
+                const field = input.dataset.field;
+                const value = input.value.trim();
+                if (value) {
+                    fieldMappings.push({
+                        id: Date.now() + Math.random(),
+                        invoiceField: value,
+                        baqField: field,
+                        regexPattern: '',
+                        source: 'ocr'
+                    });
+                }
+            });
+
+            updateMappingDisplay();
+            document.getElementById('ocr-results-section').classList.add('hidden');
+        }
+
+        // Reset OCR
+        function resetOCR() {
+            document.getElementById('ocr-results-section').classList.add('hidden');
+            document.getElementById('file-input').value = '';
+            currentFile = null;
+            ocrResults = {};
+        }
+        async function handleFileUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            if (!processingMode) {
+                alert('Please select a processing mode first!');
+                return;
+            }
+
+            currentFile = file;
+            document.getElementById('file-status').textContent = `📁 ${file.name} (${(file.size / 1024).toFixed(2)} KB)`;
+            document.getElementById('processing-section').classList.remove('hidden');
+
+            const fileType = file.type;
+            const fileName = file.name.toLowerCase();
+
+            if (fileType === 'application/pdf' || fileName.endsWith('.pdf')) {
+                await loadPdf(file);
+            } else if (fileType.includes('image') || /\.(jpg|png|jpeg|webp)$/i.test(fileName)) {
+                await loadImage(file);
+            } else if (fileType.includes('sheet') || /\.(xlsx|xls)$/i.test(fileName)) {
+                await loadExcel(file);
+            } else {
+                await loadText(file);
+            }
+
+            if (processingMode === 'ocr') {
+                await runOCR();
+            } else {
+                displayExtractedText();
+            }
+        }
+
+        // Load PDF
+        async function loadPdf(file) {
+            const arrayBuffer = await file.arrayBuffer();
+            currentPdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+            currentPage = 1;
+            await renderPdfPage(1);
+            document.getElementById('prev-page-btn').style.display = currentPage > 1 ? 'block' : 'none';
+            document.getElementById('next-page-btn').style.display = currentPage < currentPdfDoc.numPages ? 'block' : 'none';
+            extractTextFromAllPages();
+        }
+
+        // Render PDF page
+        async function renderPdfPage(pageNum) {
+            const page = await currentPdfDoc.getPage(pageNum);
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            const viewport = page.getViewport({ scale: 1.5 });
+            
+            canvas.width = viewport.width;
+            canvas.height = viewport.height;
+
+            await page.render({ canvasContext: context, viewport: viewport }).promise;
+            
+            const preview = document.getElementById('preview-container');
+            preview.innerHTML = '';
+            preview.appendChild(canvas);
+            document.getElementById('page-info').textContent = `Page ${pageNum} of ${currentPdfDoc.numPages}`;
+        }
+
+        // Extract text from all PDF pages
+        async function extractTextFromAllPages() {
+            extractedContent = '';
+            for (let i = 1; i <= currentPdfDoc.numPages; i++) {
+                const page = await currentPdfDoc.getPage(i);
+                const textContent = await page.getTextContent();
+                extractedContent += textContent.items.map(item => item.str).join(' ') + '\n---PAGE BREAK---\n';
+            }
+        }
+
+        // Load Image
+        async function loadImage(file) {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const img = document.createElement('img');
+                img.src = e.target.result;
+                img.className = 'preview-image';
+                document.getElementById('preview-container').innerHTML = '';
+                document.getElementById('preview-container').appendChild(img);
+                extractedContent = `[Image uploaded: ${file.name}]\n[Note: For scanned images, use OCR or manually highlight text areas]`;
+            };
+            reader.readAsDataURL(file);
+        }
+
+        // Load Excel
+        async function loadExcel(file) {
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    // Simple CSV/Excel text extraction (would need xlsx.js library for full support)
+                    extractedContent = `[Excel file uploaded: ${file.name}]\n[Content: Binary format - use field mapper to define extraction patterns]`;
+                    document.getElementById('preview-container').innerHTML = '<p class="text-gray-600">📊 Excel file loaded. Use field mapper below to define extraction patterns.</p>';
+                } catch (error) {
+                    extractedContent = `Error loading file: ${error.message}`;
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        // Load Text
+        async function loadText(file) {
+            const text = await file.text();
+            extractedContent = text;
+            document.getElementById('preview-container').innerHTML = `<pre class="whitespace-pre-wrap text-sm text-gray-700">${text.substring(0, 2000)}${text.length > 2000 ? '...' : ''}</pre>`;
+        }
+
+        // Display extracted text
+        function displayExtractedText() {
+            const container = document.getElementById('extracted-text-container');
+            container.textContent = extractedContent;
+            container.addEventListener('mouseup', () => {
+                const selection = window.getSelection().toString();
+                if (selection) {
+                    document.getElementById('modal-invoice-field').value = selection;
+                }
+            });
+        }
+
+        // PDF Navigation
+        function goToPreviousPage() {
+            if (currentPage > 1) {
+                currentPage--;
+                renderPdfPage(currentPage);
+                document.getElementById('prev-page-btn').style.display = currentPage > 1 ? 'block' : 'none';
+                document.getElementById('next-page-btn').style.display = currentPage < currentPdfDoc.numPages ? 'block' : 'none';
+            }
+        }
+
+        function goToNextPage() {
+            if (currentPage < currentPdfDoc.numPages) {
+                currentPage++;
+                renderPdfPage(currentPage);
+                document.getElementById('prev-page-btn').style.display = currentPage > 1 ? 'block' : 'none';
+                document.getElementById('next-page-btn').style.display = currentPage < currentPdfDoc.numPages ? 'block' : 'none';
+            }
+        }
+
+        // Select all text
+        function selectAllText() {
+            document.getElementById('mapping-modal').classList.remove('hidden');
+            document.getElementById('modal-invoice-field').value = '';
+            document.getElementById('modal-baq-field').value = '';
+            document.getElementById('modal-regex-pattern').value = '';
+        }
+
+        // Add field mapping UI
+        function addFieldMapping() {
+            document.getElementById('mapping-modal').classList.remove('hidden');
+        }
+
+        // Close modal
+        function closeModal() {
+            document.getElementById('mapping-modal').classList.add('hidden');
+        }
+
+        // Save mapping
+        function saveMapping() {
+            const invoiceField = document.getElementById('modal-invoice-field').value.trim();
+            const baqField = document.getElementById('modal-baq-field').value;
+            const regexPattern = document.getElementById('modal-regex-pattern').value.trim();
+
+            if (!invoiceField || !baqField) {
+                alert('Please fill in all fields');
+                return;
+            }
+
+            fieldMappings.push({
+                id: Date.now(),
+                invoiceField,
+                baqField,
+                regexPattern
+            });
+
+            closeModal();
+            updateMappingDisplay();
+        }
+
+        // Update mapping display
+        function updateMappingDisplay() {
+            const container = document.getElementById('field-mappings');
+            container.innerHTML = fieldMappings.map((mapping, idx) => `
+                <div class="field-mapping-row active">
+                    <div class="grid grid-cols-2 gap-4 mb-3">
+                        <div>
+                            <label class="block text-sm font-bold text-gray-700 mb-1">Invoice Field:</label>
+                            <div class="bg-blue-50 p-2 rounded text-sm font-mono break-words">${mapping.invoiceField}</div>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-bold text-gray-700 mb-1">Epicor BAQ Field:</label>
+                            <div class="bg-purple-50 p-2 rounded text-sm font-mono">${mapping.baqField}</div>
+                        </div>
+                    </div>
+                    ${mapping.regexPattern ? `<div class="mb-3"><label class="block text-sm font-bold text-gray-700 mb-1">Regex Pattern:</label><div class="bg-gray-50 p-2 rounded text-xs font-mono break-all">${mapping.regexPattern}</div></div>` : ''}
+                    <button onclick="deleteMapping(${mapping.id})" class="text-red-600 hover:text-red-800 text-sm font-bold">🗑️ Delete</button>
+                </div>
+            `).join('');
+
+            // Update summary
+            const summary = document.getElementById('mapping-summary');
+            summary.innerHTML = `
+                <div class="space-y-2">
+                    <p class="font-bold text-lg">📊 ${fieldMappings.length} Field Mapping(s) Configured:</p>
+                    ${fieldMappings.map(m => `<p class="text-sm">✓ <strong>${m.invoiceField}</strong> → <strong>${m.baqField}</strong></p>`).join('')}
+                </div>
+            `;
+        }
+
+        // Delete mapping
+        function deleteMapping(id) {
+            fieldMappings = fieldMappings.filter(m => m.id !== id);
+            updateMappingDisplay();
+        }
+
+        // Save mapping template
+        function saveMappingTemplate() {
+            if (fieldMappings.length === 0) {
+                alert('No mappings to save');
+                return;
+            }
+
+            const template = {
+                filename: currentFile.name,
+                filetype: currentFile.type,
+                mappings: fieldMappings,
+                createdAt: new Date().toISOString()
+            };
+
+            const json = JSON.stringify(template, null, 2);
+            const blob = new Blob([json], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `mapping_${Date.now()}.json`;
+            a.click();
+
+            alert('✅ Mapping template saved!');
+        }
+
+        // Apply mapping and extract
+        async function applyMappingAndExtract() {
+            if (fieldMappings.length === 0) {
+                alert('Please create at least one field mapping');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', currentFile);
+            formData.append('mappings', JSON.stringify(fieldMappings));
+
+            try {
+                const response = await axios.post(`${API_URL}/invoices/upload`, formData);
+                alert(`✅ Invoice processed!\n\nID: ${response.data.invoice_id}\nAmount: $${response.data.amount}`);
+            } catch (error) {
+                alert(`❌ Error: ${error.response?.data?.detail || error.message}`);
+            }
+        }
+    </script>
+</body>
+</html>

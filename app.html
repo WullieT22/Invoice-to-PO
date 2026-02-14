@@ -1,0 +1,901 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Invoice Processing Suite - All-in-One</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto; }
+        .fade-in { animation: fadeIn 0.5s ease-in; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .spinner { border: 3px solid rgba(59, 130, 246, 0.1); border-top: 3px solid #3B82F6; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .step-indicator { display: flex; gap: 8px; margin: 24px 0; }
+        .step-dot { width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; transition: all 0.3s; }
+        .step-dot.active { background: #3B82F6; color: white; transform: scale(1.1); }
+        .step-dot.completed { background: #10B981; color: white; }
+        .step-dot.pending { background: #E5E7EB; color: #6B7280; }
+        .field-mapping-row { border: 1px solid #E5E7EB; border-radius: 6px; padding: 12px; margin: 8px 0; background: white; }
+        .field-mapping-row.active { background: #EFF6FF; border-color: #3B82F6; }
+        .progress-bar { width: 100%; height: 8px; background: #E5E7EB; border-radius: 4px; overflow: hidden; }
+        .progress-fill { height: 100%; background: linear-gradient(90deg, #3B82F6, #8B5CF6); width: 0%; transition: width 0.3s; }
+        .template-tag { display: inline-block; background: #3B82F6; color: white; padding: 4px 8px; border-radius: 4px; font-size: 12px; margin: 2px; }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-slate-50 to-slate-100">
+    <!-- Navigation -->
+    <nav class="bg-white shadow-md sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between items-center h-16">
+                <div class="flex items-center gap-3">
+                    <div class="text-3xl">🚀</div>
+                    <div>
+                        <h1 class="text-2xl font-bold text-blue-600">Invoice Processing Suite</h1>
+                        <p class="text-xs text-gray-600">Map → Save → Process</p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-4">
+                    <span id="api-status" class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-red-100 text-red-800">
+                        <span class="inline-block w-2 h-2 rounded-full bg-red-600 mr-2"></span>
+                        Checking...
+                    </span>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        
+        <!-- Step Indicator -->
+        <div class="step-indicator mb-8 flex justify-center">
+            <div class="step-dot active" id="step-1-indicator">1</div>
+            <div class="w-12 h-1 bg-gray-300 self-center"></div>
+            <div class="step-dot pending" id="step-2-indicator">2</div>
+            <div class="w-12 h-1 bg-gray-300 self-center"></div>
+            <div class="step-dot pending" id="step-3-indicator">3</div>
+        </div>
+        <div class="text-center mb-8">
+            <p class="text-lg font-bold text-gray-800">
+                <span id="step-title">Step 1: Upload & Map Fields</span>
+            </p>
+            <p class="text-sm text-gray-600" id="step-description">Upload an invoice and define field mappings</p>
+        </div>
+
+        <!-- STEP 1: Upload & Map -->
+        <div id="step-1" class="space-y-6">
+            <!-- Mode Selection -->
+            <div class="bg-white rounded-lg shadow p-6">
+                <h2 class="text-xl font-bold mb-4">🔧 Processing Mode</h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div onclick="selectMode('manual')" class="border-2 border-blue-300 rounded-lg p-6 cursor-pointer hover:shadow-lg transition bg-blue-50" id="mode-manual-btn">
+                        <div class="text-4xl mb-3">🗂️</div>
+                        <h3 class="text-lg font-bold mb-2">Manual Mapping</h3>
+                        <p class="text-sm text-gray-700">Select & highlight fields</p>
+                    </div>
+                    <div onclick="selectMode('ocr')" class="border-2 border-gray-300 rounded-lg p-6 cursor-pointer hover:shadow-lg transition hover:border-purple-300" id="mode-ocr-btn">
+                        <div class="text-4xl mb-3">🤖</div>
+                        <h3 class="text-lg font-bold mb-2">Auto OCR</h3>
+                        <p class="text-sm text-gray-700">AI extracts fields automatically</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Existing Templates Quick Select -->
+            <div id="quick-template-section" class="hidden bg-green-50 border border-green-200 rounded-lg p-6 mb-6">
+                <h2 class="text-xl font-bold mb-4">⚡ Have an Existing Template?</h2>
+                <p class="text-gray-700 mb-4">Skip mapping! Select a customer template:</p>
+                <div id="quick-templates-list" class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+                    <!-- Templates will appear here -->
+                </div>
+                <p class="text-sm text-gray-600">Or create a new template by uploading a file below</p>
+            </div>
+
+            <!-- File Upload -->
+            <div class="bg-white rounded-lg shadow p-6">
+                <h2 class="text-xl font-bold mb-4">📤 Upload Invoice</h2>
+                <div class="border-2 border-dashed border-blue-300 rounded-lg p-8 text-center bg-blue-50 cursor-pointer hover:border-blue-500 transition" onclick="document.getElementById('file-input').click()">
+                    <input type="file" id="file-input" accept=".pdf,.xlsx,.xls,.jpg,.png,.jpeg,.webp,.txt,.csv" onchange="handleFileUpload(event)" style="display:none;">
+                    <div class="text-5xl mb-3">📁</div>
+                    <h3 class="text-xl font-bold text-gray-800 mb-2">Drop your invoice</h3>
+                    <p class="text-gray-600">PDF, Images, Excel, TXT, CSV</p>
+                </div>
+                <p class="text-center text-gray-600 mt-4" id="file-status">Select a file to start</p>
+            </div>
+
+            <!-- Preview & Fields -->
+            <div id="preview-section" class="hidden grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <!-- Document Preview -->
+                <div class="bg-white rounded-lg shadow p-6">
+                    <h3 class="text-lg font-bold mb-4">📄 Preview</h3>
+                    <div id="preview-container" class="bg-gray-100 rounded p-4 flex items-center justify-center" style="min-height: 400px;">
+                        <div class="spinner"></div>
+                    </div>
+                </div>
+
+                <!-- Extracted/OCR Text -->
+                <div class="bg-white rounded-lg shadow p-6">
+                    <h3 class="text-lg font-bold mb-4">📋 Content</h3>
+                    <div id="extracted-text" class="bg-gray-50 p-4 rounded text-sm max-h-96 overflow-y-auto font-mono whitespace-pre-wrap break-words cursor-text border-2 border-transparent hover:border-blue-200 transition" title="Highlight text to map it"></div>
+                    <p class="text-xs text-gray-500 mt-2">💡 Tip: Highlight text above to automatically map it to a field.</p>
+                </div>
+            </div>
+
+            <!-- Field Mappings -->
+            <div id="mappings-section" class="hidden bg-white rounded-lg shadow p-6">
+                <h2 class="text-xl font-bold mb-4">🎯 Define Field Mappings</h2>
+                <p class="text-gray-600 mb-4">Map invoice fields to Epicor BAQ fields</p>
+                
+                <div id="detected-mappings" class="space-y-3 mb-6">
+                    <!-- Mappings will be added here -->
+                </div>
+
+                <button onclick="addNewMapping()" class="w-full bg-green-600 text-white py-3 px-4 rounded-lg hover:bg-green-700 transition font-bold mb-4">
+                    + Add Mapping
+                </button>
+
+                <div class="flex gap-3">
+                    <button onclick="goToStep(1)" class="flex-1 bg-gray-600 text-white py-2 px-4 rounded hover:bg-gray-700 transition">
+                        ← Back
+                    </button>
+                    <button onclick="goToStep(2)" class="flex-1 bg-blue-600 text-white py-2 px-4 rounded hover:bg-blue-700 transition font-bold">
+                        Next: Save Template →
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- STEP 2: Save as Template -->
+        <div id="step-2" class="hidden space-y-6">
+            <div class="bg-white rounded-lg shadow p-6">
+                <h2 class="text-2xl font-bold mb-6">💾 Save as Customer Template</h2>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                    <div>
+                        <label class="block font-bold mb-2">Customer/Vendor Name:</label>
+                        <input type="text" id="template-customer" placeholder="e.g., Acme Corp, ABC Vendor" class="w-full border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-600">
+                    </div>
+                    <div>
+                        <label class="block font-bold mb-2">Invoice Type:</label>
+                        <select id="template-type" class="w-full border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-600">
+                            <option value="standard">Standard Invoice</option>
+                            <option value="credit">Credit Memo</option>
+                            <option value="debit">Debit Memo</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Mappings Summary -->
+                <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+                    <h3 class="font-bold mb-3">📊 Mappings Summary:</h3>
+                    <div id="template-mappings-summary" class="text-sm space-y-1">
+                        <!-- Summary will appear here -->
+                    </div>
+                </div>
+
+                <!-- Template Preview -->
+                <div class="mb-6 p-4 bg-gray-50 rounded border">
+                    <h4 class="font-bold mb-2">Template JSON (for reference):</h4>
+                    <textarea id="template-json-preview" class="w-full border rounded px-3 py-2 font-mono text-xs h-32" readonly></textarea>
+                </div>
+
+                <div class="flex gap-3">
+                    <button onclick="goToStep(1)" class="flex-1 bg-gray-600 text-white py-2 px-4 rounded hover:bg-gray-700 transition">
+                        ← Back
+                    </button>
+                    <button onclick="saveAsTemplate()" class="flex-1 bg-green-600 text-white py-3 px-4 rounded hover:bg-green-700 transition font-bold">
+                        ✅ Save Template
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- STEP 3: Batch Upload -->
+        <div id="step-3" class="hidden space-y-6">
+            <div class="bg-white rounded-lg shadow p-6">
+                <h2 class="text-2xl font-bold mb-6">📦 Batch Upload Similar Invoices</h2>
+                
+                <!-- Template Selector -->
+                <div class="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                    <h3 class="font-bold mb-3">🔄 Select Template to Use:</h3>
+                    <div id="batch-templates-list" class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <p class="text-gray-600">No templates saved yet</p>
+                    </div>
+                </div>
+
+                <!-- Batch File Upload -->
+                <div id="batch-upload-section" class="hidden">
+                    <div class="border-2 border-dashed border-green-300 rounded-lg p-8 text-center bg-green-50 cursor-pointer hover:border-green-500 transition" onclick="document.getElementById('batch-file-input').click()">
+                        <input type="file" id="batch-file-input" multiple accept=".pdf,.xlsx,.xls,.jpg,.png,.jpeg,.webp,.txt,.csv" onchange="handleBatchUpload(event)" style="display:none;">
+                        <div class="text-5xl mb-3">📁</div>
+                        <h3 class="text-xl font-bold text-gray-800 mb-2">Drop multiple invoices</h3>
+                        <p class="text-gray-600">Upload 5, 50, or 500 similar invoices</p>
+                    </div>
+                    <p class="text-center text-gray-600 mt-4" id="batch-file-status">Drag files or click to select</p>
+                </div>
+
+                <!-- Batch Processing -->
+                <div id="batch-processing-section" class="hidden">
+                    <div class="progress-bar mb-4">
+                        <div class="progress-fill" id="batch-progress" style="width: 0%"></div>
+                    </div>
+                    <p class="text-center text-gray-700 mb-4" id="batch-progress-text">Ready to process</p>
+                    <div id="batch-items-list" class="space-y-2 max-h-96 overflow-y-auto mb-6"></div>
+                    
+                    <div id="batch-results" class="hidden p-4 bg-gray-50 rounded-lg">
+                        <h3 class="font-bold text-lg mb-3">📈 Summary:</h3>
+                        <div class="grid grid-cols-4 gap-4 mb-6">
+                            <div class="bg-green-50 p-3 rounded text-center">
+                                <p class="text-2xl font-bold text-green-600" id="result-success">0</p>
+                                <p class="text-sm text-gray-600">Processed</p>
+                            </div>
+                            <div class="bg-blue-50 p-3 rounded text-center">
+                                <p class="text-2xl font-bold text-blue-600" id="result-matched">0</p>
+                                <p class="text-sm text-gray-600">Matched ✅</p>
+                            </div>
+                            <div class="bg-yellow-50 p-3 rounded text-center">
+                                <p class="text-2xl font-bold text-yellow-600" id="result-review">0</p>
+                                <p class="text-sm text-gray-600">Review ⚠️</p>
+                            </div>
+                            <div class="bg-red-50 p-3 rounded text-center">
+                                <p class="text-2xl font-bold text-red-600" id="result-errors">0</p>
+                                <p class="text-sm text-gray-600">Failed ❌</p>
+                            </div>
+                        </div>
+
+                        <!-- Detailed Results -->
+                        <div class="mt-6">
+                            <h4 class="font-bold mb-3">📋 Detailed Match Results:</h4>
+                            <div id="detailed-results" class="space-y-3 max-h-96 overflow-y-auto"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex gap-3 mt-6">
+                    <button onclick="goToStep(2)" class="flex-1 bg-gray-600 text-white py-2 px-4 rounded hover:bg-gray-700 transition">
+                        ← Back
+                    </button>
+                    <button onclick="startBatchProcessing()" id="start-batch-btn" class="flex-1 bg-blue-600 text-white py-3 px-4 rounded hover:bg-blue-700 transition font-bold" style="display:none;">
+                        🚀 Process Batch
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Mapping Modal -->
+    <div id="mapping-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-lg shadow-xl p-8 max-w-md w-full mx-4">
+            <h3 class="text-2xl font-bold mb-4">Add Field Mapping</h3>
+            
+            <div class="mb-4">
+                <label class="block font-bold mb-2">Invoice Field:</label>
+                <input type="text" id="modal-invoice-field" placeholder="e.g., Invoice #12345" class="w-full border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-600">
+                <p class="text-xs text-gray-500 mt-1">The text you highlighted from the invoice</p>
+            </div>
+
+            <div class="mb-6">
+                <label class="block font-bold mb-2">Epicor BAQ Field:</label>
+                <select id="modal-baq-field" class="w-full border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-600">
+                    <option value="">Select BAQ Field...</option>
+                    <option value="invoice_number">invoice_number</option>
+                    <option value="invoice_date">invoice_date</option>
+                    <option value="vendor_name">vendor_name</option>
+                    <option value="vendor_id">vendor_id</option>
+                    <option value="po_number">po_number</option>
+                    <option value="invoice_amount">invoice_amount</option>
+                    <option value="line_amount">line_amount</option>
+                    <option value="description">description</option>
+                    <option value="line_number">line_number</option>
+                    <option value="quantity">quantity</option>
+                    <option value="unit_price">unit_price</option>
+                    <option value="tax_amount">tax_amount</option>
+                </select>
+            </div>
+
+            <div class="flex gap-3">
+                <button onclick="closeModal()" class="flex-1 bg-gray-600 text-white py-2 px-4 rounded hover:bg-gray-700 transition">
+                    Cancel
+                </button>
+                <button onclick="saveMapping()" class="flex-1 bg-blue-600 text-white py-2 px-4 rounded hover:bg-blue-700 transition">
+                    Save
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Global State
+        let currentFile = null;
+        let extractedContent = '';
+        let currentMode = null;
+        let fieldMappings = [];
+        let currentPdfDoc = null;
+        let currentStep = 1;
+        let templates = JSON.parse(localStorage.getItem('invoiceTemplates')) || [];
+        let selectedBatchTemplate = null;
+        let batchFiles = [];
+        let batchResults = { successful: 0, matched: 0, errors: 0 };
+
+        const API_URL = 'http://localhost:8000/api';
+        const BAQ_FIELDS = [
+            'invoice_number', 'invoice_date', 'vendor_name', 'vendor_id',
+            'po_number', 'invoice_amount', 'line_amount', 'description',
+            'line_number', 'quantity', 'unit_price', 'tax_amount'
+        ];
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            checkAPIStatus();
+            setInterval(checkAPIStatus, 5000);
+            loadTemplatesForBatch();
+            showQuickTemplateSelector();
+            
+            // Add Highlight-to-Map functionality
+            document.getElementById('extracted-text').addEventListener('mouseup', function() {
+                const selection = window.getSelection().toString().trim();
+                if (selection.length > 0) {
+                    document.getElementById('modal-invoice-field').value = selection;
+                    // Auto-open modal
+                    addNewMapping();
+                    // Optional: Flash the modal to show it's active
+                }
+            });
+        });
+
+        // Check API Status
+        async function checkAPIStatus() {
+            try {
+                const response = await axios.get('http://localhost:8000/health', { timeout: 2000 });
+                document.getElementById('api-status').innerHTML = '<span class="inline-block w-2 h-2 rounded-full bg-green-600 mr-2"></span>API Running';
+                document.getElementById('api-status').className = 'inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800';
+            } catch (error) {
+                document.getElementById('api-status').innerHTML = '<span class="inline-block w-2 h-2 rounded-full bg-red-600 mr-2"></span>API Offline';
+                document.getElementById('api-status').className = 'inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-red-100 text-red-800';
+            }
+        }
+
+        // Mode Selection
+        function selectMode(mode) {
+            currentMode = mode;
+            document.getElementById('mode-manual-btn').classList.toggle('bg-blue-50', mode === 'manual');
+            document.getElementById('mode-manual-btn').classList.toggle('border-blue-300', mode === 'manual');
+            document.getElementById('mode-ocr-btn').classList.toggle('bg-purple-50', mode === 'ocr');
+            document.getElementById('mode-ocr-btn').classList.toggle('border-purple-300', mode === 'ocr');
+        }
+
+        // File Upload
+        async function handleFileUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            currentFile = file;
+            document.getElementById('file-status').textContent = `📁 ${file.name}`;
+
+            // Check if using existing template
+            if (selectedBatchTemplate && selectedBatchTemplate.mappings.length > 0) {
+                // Skip to Step 3 directly!
+                document.getElementById('preview-section').classList.add('hidden');
+                document.getElementById('mappings-section').classList.add('hidden');
+                
+                alert(`✅ Using template: "${selectedBatchTemplate.name}"\n\nSkipping field mapping and going to batch processing...`);
+                batchFiles = [file];
+                document.getElementById('batch-file-status').textContent = `📁 1 file ready`;
+                document.getElementById('batch-processing-section').classList.remove('hidden');
+                document.getElementById('start-batch-btn').style.display = 'block';
+                goToStep(3);
+                return;
+            }
+
+            // Normal flow - show preview and mapping
+            document.getElementById('preview-section').classList.remove('hidden');
+            document.getElementById('mappings-section').classList.remove('hidden');
+
+            const fileType = file.type;
+            if (fileType === 'application/pdf' || file.name.endsWith('.pdf')) {
+                await loadPdf(file);
+            } else if (fileType.includes('image')) {
+                await loadImage(file);
+            } else {
+                await loadText(file);
+            }
+
+            if (currentMode === 'ocr') {
+                await runOCR();
+            }
+        }
+
+        // Load PDF
+        async function loadPdf(file) {
+            const arrayBuffer = await file.arrayBuffer();
+            currentPdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+            const page = await currentPdfDoc.getPage(1);
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            const viewport = page.getViewport({ scale: 1.5 });
+            canvas.width = viewport.width;
+            canvas.height = viewport.height;
+            await page.render({ canvasContext: context, viewport: viewport }).promise;
+            
+            document.getElementById('preview-container').innerHTML = '';
+            document.getElementById('preview-container').appendChild(canvas);
+
+            const textContent = await page.getTextContent();
+            extractedContent = textContent.items.map(item => item.str).join(' ');
+            document.getElementById('extracted-text').textContent = extractedContent;
+        }
+
+        // Load Image
+        async function loadImage(file) {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const img = document.createElement('img');
+                img.src = e.target.result;
+                img.style.maxWidth = '100%';
+                document.getElementById('preview-container').innerHTML = '';
+                document.getElementById('preview-container').appendChild(img);
+                extractedContent = '[Image loaded]';
+                document.getElementById('extracted-text').textContent = 'Image file selected. Use OCR mode or manually highlight fields.';
+            };
+            reader.readAsDataURL(file);
+        }
+
+        // Load Text
+        async function loadText(file) {
+            extractedContent = await file.text();
+            document.getElementById('preview-container').innerHTML = `<pre class="text-xs overflow-auto">${extractedContent.substring(0, 1000)}</pre>`;
+            document.getElementById('extracted-text').textContent = extractedContent;
+        }
+
+        // Run OCR
+        async function runOCR() {
+            document.getElementById('extracted-text').textContent = '🔍 Running OCR...';
+            try {
+                const { data: { text } } = await Tesseract.recognize(currentFile, 'eng');
+                extractedContent = text;
+                document.getElementById('extracted-text').textContent = text;
+                detectAndAddMappings(text);
+            } catch (error) {
+                document.getElementById('extracted-text').textContent = '❌ OCR Error: ' + error.message;
+            }
+        }
+
+        // Detect fields from OCR
+        function detectAndAddMappings(text) {
+            const patterns = {
+                invoice_number: /(?:invoice|inv|bill|#|no\.?)\s*[#:]?\s*([A-Z0-9\-\/]+)/i,
+                invoice_date: /(?:date|invoice date)\s*[:\-]?\s*(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/i,
+                vendor_name: /(?:from|vendor|supplier)\s*[:\-]?\s*([A-Z][A-Za-z\s&.,]*)/i,
+                po_number: /(?:p\.?o\.?|purchase order)\s*[:\-]?\s*([A-Z0-9\-\/]+)/i,
+                invoice_amount: /(?:total|amount|grand total)\s*[:\-]?\s*\$?\s*([\d,]+\.?\d*)/i,
+            };
+
+            fieldMappings = [];
+            Object.entries(patterns).forEach(([field, pattern]) => {
+                const match = text.match(pattern);
+                if (match) {
+                    fieldMappings.push({
+                        id: Date.now() + Math.random(),
+                        invoiceField: match[1].trim(),
+                        baqField: field,
+                        regexPattern: ''
+                    });
+                }
+            });
+
+            updateMappingsDisplay();
+        }
+
+        // Add New Mapping
+        function addNewMapping() {
+            document.getElementById('mapping-modal').classList.remove('hidden');
+        }
+
+        // Close Modal
+        function closeModal() {
+            document.getElementById('mapping-modal').classList.add('hidden');
+            document.getElementById('modal-invoice-field').value = '';
+            document.getElementById('modal-baq-field').value = '';
+        }
+
+        // Save Mapping
+        function saveMapping() {
+            const invoiceField = document.getElementById('modal-invoice-field').value.trim();
+            const baqField = document.getElementById('modal-baq-field').value;
+
+            if (!invoiceField || !baqField) {
+                alert('Please fill all fields');
+                return;
+            }
+
+            fieldMappings.push({
+                id: Date.now(),
+                invoiceField,
+                baqField,
+                regexPattern: ''
+            });
+
+            closeModal();
+            updateMappingsDisplay();
+        }
+
+        // Update Mappings Display
+        function updateMappingsDisplay() {
+            const container = document.getElementById('detected-mappings');
+            container.innerHTML = fieldMappings.map(m => `
+                <div class="field-mapping-row active">
+                    <div class="flex justify-between items-start">
+                        <div class="flex-1">
+                            <p class="text-sm font-bold text-gray-700">Invoice: ${m.invoiceField}</p>
+                            <p class="text-sm text-blue-600">→ Epicor: ${m.baqField}</p>
+                        </div>
+                        <button onclick="deleteMapping(${m.id})" class="text-red-600 hover:text-red-800 font-bold">✕</button>
+                    </div>
+                </div>
+            `).join('');
+
+            // Update template preview
+            updateTemplateSummary();
+        }
+
+        // Delete Mapping
+        function deleteMapping(id) {
+            fieldMappings = fieldMappings.filter(m => m.id !== id);
+            updateMappingsDisplay();
+        }
+
+        // Update Template Summary
+        function updateTemplateSummary() {
+            const summary = document.getElementById('template-mappings-summary');
+            summary.innerHTML = fieldMappings.map(m => `
+                <p>✓ <strong>${m.invoiceField}</strong> → <strong>${m.baqField}</strong></p>
+            `).join('');
+
+            const templateJson = {
+                name: document.getElementById('template-customer').value || 'New Template',
+                type: document.getElementById('template-type').value,
+                mappings: fieldMappings
+            };
+            document.getElementById('template-json-preview').value = JSON.stringify(templateJson, null, 2);
+        }
+
+        // Save as Template
+        function saveAsTemplate() {
+            const customer = document.getElementById('template-customer').value.trim();
+            const type = document.getElementById('template-type').value;
+
+            if (!customer) {
+                alert('Please enter customer name');
+                return;
+            }
+
+            if (fieldMappings.length === 0) {
+                alert('Please define at least one field mapping');
+                return;
+            }
+
+            const template = {
+                id: Date.now(),
+                name: customer,
+                type,
+                mappings: fieldMappings,
+                createdAt: new Date().toISOString(),
+                usageCount: 0
+            };
+
+            templates.push(template);
+            localStorage.setItem('invoiceTemplates', JSON.stringify(templates));
+
+            alert(`✅ Template "${customer}" saved!`);
+            goToStep(3);
+        }
+
+        // Load Templates for Batch
+        function loadTemplatesForBatch() {
+            const container = document.getElementById('batch-templates-list');
+
+            if (templates.length === 0) {
+                container.innerHTML = '<p class="col-span-2 text-gray-600">No templates yet. Complete Steps 1-2 first!</p>';
+                return;
+            }
+
+            container.innerHTML = templates.map(t => `
+                <div onclick="selectBatchTemplate(${t.id})" class="border rounded p-4 cursor-pointer hover:bg-blue-50 transition ${selectedBatchTemplate?.id === t.id ? 'bg-blue-50 border-blue-500' : 'border-gray-300'}">
+                    <h4 class="font-bold">${t.name}</h4>
+                    <p class="text-sm text-gray-600">📍 ${t.mappings.length} mappings</p>
+                    <p class="text-xs text-gray-500">Type: ${t.type}</p>
+                </div>
+            `).join('');
+        }
+
+        // Show Quick Template Selector on Step 1
+        function showQuickTemplateSelector() {
+            if (templates.length > 0) {
+                document.getElementById('quick-template-section').classList.remove('hidden');
+                const container = document.getElementById('quick-templates-list');
+                container.innerHTML = templates.map(t => `
+                    <div onclick="useExistingTemplate(${t.id})" class="border-2 border-green-300 rounded-lg p-4 cursor-pointer hover:shadow-lg transition bg-white hover:bg-green-50">
+                        <div class="flex justify-between items-start mb-2">
+                            <h4 class="font-bold text-lg">${t.name}</h4>
+                            <span class="text-xs bg-green-100 text-green-800 px-2 py-1 rounded">Ready</span>
+                        </div>
+                        <p class="text-sm text-gray-600">📍 ${t.mappings.length} field mappings</p>
+                        <p class="text-xs text-gray-500">Used ${t.usageCount} times</p>
+                        <p class="text-xs text-green-600 mt-2">Click to select & process</p>
+                    </div>
+                `).join('');
+            } else {
+                document.getElementById('quick-template-section').classList.add('hidden');
+            }
+        }
+
+        // Use Existing Template
+        function useExistingTemplate(templateId) {
+            const template = templates.find(t => t.id === templateId);
+            if (!template) return;
+
+            fieldMappings = JSON.parse(JSON.stringify(template.mappings));
+            selectedBatchTemplate = template;
+            
+            // Pre-fill the customer name
+            document.getElementById('template-customer').value = template.name;
+            document.getElementById('template-type').value = template.type;
+            updateTemplateSummary();
+
+            alert(`✅ Template "${template.name}" selected!\n\nNow upload an invoice to process with this template.`);
+            
+            // Show template info
+            document.getElementById('quick-template-section').innerHTML = `
+                <div class="bg-green-100 border border-green-400 rounded-lg p-4">
+                    <h3 class="font-bold text-green-900">✅ Using Template: ${template.name}</h3>
+                    <p class="text-sm text-green-800 mt-1">Upload an invoice file to process automatically</p>
+                </div>
+            `;
+        }
+
+        // Select Batch Template
+        function selectBatchTemplate(id) {
+            selectedBatchTemplate = templates.find(t => t.id === id);
+            loadTemplatesForBatch();
+            document.getElementById('batch-upload-section').classList.remove('hidden');
+            document.getElementById('start-batch-btn').style.display = 'block';
+        }
+
+        // Handle Batch Upload
+        function handleBatchUpload(event) {
+            batchFiles = Array.from(event.target.files);
+            document.getElementById('batch-file-status').textContent = `📁 ${batchFiles.length} file(s) selected`;
+            document.getElementById('batch-processing-section').classList.remove('hidden');
+        }
+
+        // Start Batch Processing
+        async function startBatchProcessing() {
+            if (!selectedBatchTemplate || batchFiles.length === 0) {
+                alert('Select template and files first');
+                return;
+            }
+
+            batchResults = { successful: 0, matched: 0, review: 0, errors: 0, items: [] };
+            const itemsList = document.getElementById('batch-items-list');
+            itemsList.innerHTML = '';
+
+            for (let i = 0; i < batchFiles.length; i++) {
+                const file = batchFiles[i];
+                const item = document.createElement('div');
+                item.className = 'border rounded p-3 bg-yellow-50';
+                item.textContent = `📄 ${file.name} - Processing...`;
+                itemsList.appendChild(item);
+
+                const progress = ((i + 1) / batchFiles.length) * 100;
+                document.getElementById('batch-progress').style.width = progress + '%';
+                document.getElementById('batch-progress-text').textContent = `${i + 1} of ${batchFiles.length} files`;
+
+                try {
+                    const formData = new FormData();
+                    formData.append('file', file);
+                    formData.append('mappings', JSON.stringify(selectedBatchTemplate.mappings));
+
+                    const uploadRes = await axios.post(`${API_URL}/invoices/upload`, formData);
+                    
+                    let matchResult = {
+                        filename: file.name,
+                        status: 'error',
+                        invoiceId: uploadRes.data.invoice_id,
+                        invoiceNumber: uploadRes.data.invoice_number,
+                        amount: uploadRes.data.amount,
+                        poNumber: null,
+                        confidence: 0,
+                        reasoning: 'No match found',
+                        error: null
+                    };
+
+                    try {
+                        const matchRes = await axios.post(`${API_URL}/invoices/match/${uploadRes.data.invoice_id}`);
+                        
+                        if (matchRes.data.match_found) {
+                            const confidence = matchRes.data.match_score;
+                            
+                            if (confidence >= 0.85) {
+                                matchResult.status = 'matched';
+                                item.className = 'border rounded p-3 bg-green-50';
+                                batchResults.matched++;
+                            } else if (confidence >= 0.60) {
+                                matchResult.status = 'review';
+                                item.className = 'border rounded p-3 bg-yellow-50';
+                                batchResults.review++;
+                            } else {
+                                matchResult.status = 'review';
+                                item.className = 'border rounded p-3 bg-yellow-50';
+                                batchResults.review++;
+                            }
+
+                            matchResult.poNumber = matchRes.data.po_number;
+                            matchResult.confidence = confidence;
+                            matchResult.reasoning = matchRes.data.reasoning;
+                            
+                            item.textContent = `${matchResult.status === 'matched' ? '✅' : '⚠️'} ${file.name} → PO: ${matchRes.data.po_number} (${(confidence * 100).toFixed(0)}%)`;
+                        } else {
+                            matchResult.status = 'no_match';
+                            item.className = 'border rounded p-3 bg-orange-50';
+                            batchResults.review++;
+                            item.textContent = `⚠️ ${file.name} - No PO match found`;
+                        }
+                    } catch (matchError) {
+                        matchResult.status = 'error';
+                        matchResult.error = matchError.response?.data?.detail || matchError.message;
+                        item.className = 'border rounded p-3 bg-red-50';
+                        batchResults.errors++;
+                        item.textContent = `❌ ${file.name} - Match Error`;
+                    }
+
+                    batchResults.items.push(matchResult);
+                    batchResults.successful++;
+                } catch (error) {
+                    item.className = 'border rounded p-3 bg-red-50';
+                    item.textContent = `❌ ${file.name} - Upload Error`;
+                    batchResults.errors++;
+                    batchResults.items.push({
+                        filename: file.name,
+                        status: 'error',
+                        error: error.response?.data?.detail || error.message
+                    });
+                }
+            }
+
+            // Update summary
+            document.getElementById('result-success').textContent = batchResults.successful;
+            document.getElementById('result-matched').textContent = batchResults.matched;
+            document.getElementById('result-review').textContent = batchResults.review;
+            document.getElementById('result-errors').textContent = batchResults.errors;
+
+            // Show detailed results
+            displayDetailedResults();
+            document.getElementById('batch-results').classList.remove('hidden');
+        }
+
+        // Display Detailed Results
+        function displayDetailedResults() {
+            const container = document.getElementById('detailed-results');
+            container.innerHTML = batchResults.items.map((result, idx) => {
+                const statusIcon = {
+                    'matched': '✅',
+                    'review': '⚠️',
+                    'no_match': '❓',
+                    'error': '❌'
+                }[result.status] || '❓';
+
+                const statusColor = {
+                    'matched': 'border-green-300 bg-green-50',
+                    'review': 'border-yellow-300 bg-yellow-50',
+                    'no_match': 'border-orange-300 bg-orange-50',
+                    'error': 'border-red-300 bg-red-50'
+                }[result.status] || 'border-gray-300 bg-gray-50';
+
+                const statusLabel = {
+                    'matched': 'HIGH CONFIDENCE',
+                    'review': 'NEEDS REVIEW',
+                    'no_match': 'NO MATCH FOUND',
+                    'error': 'ERROR'
+                }[result.status] || 'UNKNOWN';
+
+                let detailsHtml = `
+                    <div class="border-l-4 ${statusColor} border rounded p-4">
+                        <div class="flex justify-between items-start mb-2">
+                            <div>
+                                <h4 class="font-bold text-lg">${statusIcon} ${result.filename}</h4>
+                                <p class="text-sm text-gray-600">Invoice: ${result.invoiceNumber || 'N/A'}</p>
+                            </div>
+                            <span class="text-xs font-bold px-2 py-1 rounded ${
+                                result.status === 'matched' ? 'bg-green-200 text-green-800' :
+                                result.status === 'review' ? 'bg-yellow-200 text-yellow-800' :
+                                result.status === 'no_match' ? 'bg-orange-200 text-orange-800' :
+                                'bg-red-200 text-red-800'
+                            }">
+                                ${statusLabel}
+                            </span>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2 text-sm mb-3">
+                            <div>
+                                <p class="text-gray-600">Amount:</p>
+                                <p class="font-bold">$${result.amount ? result.amount.toFixed(2) : 'N/A'}</p>
+                            </div>
+                            ${result.poNumber ? `
+                                <div>
+                                    <p class="text-gray-600">Matched PO:</p>
+                                    <p class="font-bold text-blue-600">${result.poNumber}</p>
+                                </div>
+                            ` : ''}
+                        </div>
+                        ${result.confidence ? `
+                            <div class="mb-3">
+                                <p class="text-sm text-gray-600 mb-1">Match Confidence:</p>
+                                <div class="flex items-center gap-2">
+                                    <div class="flex-1 bg-gray-200 rounded-full h-2 overflow-hidden">
+                                        <div class="bg-blue-600 h-full" style="width: ${result.confidence * 100}%"></div>
+                                    </div>
+                                    <span class="text-sm font-bold">${(result.confidence * 100).toFixed(0)}%</span>
+                                </div>
+                            </div>
+                        ` : ''}
+                        ${result.reasoning ? `
+                            <div class="bg-white bg-opacity-50 rounded p-2 mb-3">
+                                <p class="text-xs text-gray-700"><strong>AI Reasoning:</strong> ${result.reasoning}</p>
+                            </div>
+                        ` : ''}
+                        ${result.error ? `
+                            <div class="bg-red-100 rounded p-2 mb-3">
+                                <p class="text-xs text-red-800"><strong>Error:</strong> ${result.error}</p>
+                            </div>
+                        ` : ''}
+                    </div>
+                `;
+                return detailsHtml;
+            }).join('');
+        }
+
+        // Step Navigation
+        function goToStep(step) {
+            document.getElementById(`step-${currentStep}`).classList.add('hidden');
+            document.getElementById(`step-${step}`).classList.remove('hidden');
+
+            for (let i = 1; i <= 3; i++) {
+                const dot = document.getElementById(`step-${i}-indicator`);
+                if (i < step) {
+                    dot.className = 'step-dot completed';
+                    dot.textContent = '✓';
+                } else if (i === step) {
+                    dot.className = 'step-dot active';
+                    dot.textContent = i;
+                } else {
+                    dot.className = 'step-dot pending';
+                    dot.textContent = i;
+                }
+            }
+
+            const titles = [
+                'Step 1: Upload & Map Fields',
+                'Step 2: Save as Customer Template',
+                'Step 3: Batch Upload Similar Invoices'
+            ];
+            document.getElementById('step-title').textContent = titles[step - 1];
+
+            const descriptions = [
+                'Upload an invoice and define field mappings',
+                'Save your mappings as a reusable template for this customer',
+                'Upload multiple invoices from the same customer using the template'
+            ];
+            document.getElementById('step-description').textContent = descriptions[step - 1];
+
+            if (step === 3) {
+                loadTemplatesForBatch();
+            }
+
+            currentStep = step;
+        }
+    </script>
+</body>
+</html>

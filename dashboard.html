@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Invoice to PO Matching Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto; }
+        .fade-in { animation: fadeIn 0.5s ease-in; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .spinner { border: 3px solid rgba(59, 130, 246, 0.1); border-top: 3px solid #3B82F6; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .match-badge { padding: 0.5rem 1rem; border-radius: 0.5rem; font-weight: 600; }
+        .match-high { background: #D1FAE5; color: #065F46; }
+        .match-medium { background: #FEF3C7; color: #78350F; }
+        .match-low { background: #FEE2E2; color: #7F1D1D; }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-slate-50 to-slate-100">
+    <!-- Navigation Bar -->
+    <nav class="bg-white shadow-md sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between items-center h-16">
+                <div class="flex items-center gap-3">
+                    <div class="text-3xl">📄</div>
+                    <h1 class="text-2xl font-bold text-blue-600">Invoice to PO Matching</h1>
+                </div>
+                <div class="flex gap-4 items-center">
+                    <span id="api-status" class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-red-100 text-red-800">
+                        <span class="inline-block w-2 h-2 rounded-full bg-red-600 mr-2"></span>
+                        Checking...
+                    </span>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        
+        <!-- Tab Navigation -->
+        <div class="flex gap-2 mb-6 bg-white p-1 rounded-lg shadow-sm">
+            <button onclick="showTab('dashboard')" class="tab-btn active px-6 py-2 rounded-md font-medium transition" id="tab-dashboard">📊 Dashboard</button>
+            <button onclick="showTab('upload')" class="tab-btn px-6 py-2 rounded-md font-medium transition" id="tab-upload">📤 Upload Invoice</button>
+            <button onclick="showTab('matches')" class="tab-btn px-6 py-2 rounded-md font-medium transition" id="tab-matches">✅ Pending Matches</button>
+            <button onclick="showTab('pos')" class="tab-btn px-6 py-2 rounded-md font-medium transition" id="tab-pos">📋 Purchase Orders</button>
+        </div>
+
+        <!-- Dashboard Tab -->
+        <div id="tab-content-dashboard" class="tab-content fade-in">
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+                <div class="bg-white rounded-lg shadow p-6">
+                    <div class="text-gray-500 text-sm">Total POs</div>
+                    <div class="text-3xl font-bold text-blue-600" id="stat-pos">0</div>
+                </div>
+                <div class="bg-white rounded-lg shadow p-6">
+                    <div class="text-gray-500 text-sm">Pending Matches</div>
+                    <div class="text-3xl font-bold text-yellow-600" id="stat-pending">0</div>
+                </div>
+                <div class="bg-white rounded-lg shadow p-6">
+                    <div class="text-gray-500 text-sm">Approved</div>
+                    <div class="text-3xl font-bold text-green-600" id="stat-approved">0</div>
+                </div>
+                <div class="bg-white rounded-lg shadow p-6">
+                    <div class="text-gray-500 text-sm">API Status</div>
+                    <div id="api-response" class="text-sm text-gray-600 mt-2">Checking...</div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <!-- Quick Actions -->
+                <div class="bg-white rounded-lg shadow p-6">
+                    <h2 class="text-xl font-bold mb-4">⚡ Quick Actions</h2>
+                    <div class="space-y-3">
+                        <button onclick="syncPOs()" class="w-full bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition font-medium">
+                            🔄 Sync POs from Epicor
+                        </button>
+                        <button onclick="document.getElementById('file-input').click()" class="w-full bg-green-600 text-white py-2 px-4 rounded-lg hover:bg-green-700 transition font-medium">
+                            📤 Upload Invoice
+                        </button>
+                        <button onclick="loadPendingMatches()" class="w-full bg-purple-600 text-white py-2 px-4 rounded-lg hover:bg-purple-700 transition font-medium">
+                            ✅ Load Pending Matches
+                        </button>
+                    </div>
+                </div>
+
+                <!-- API Documentation -->
+                <div class="bg-white rounded-lg shadow p-6">
+                    <h2 class="text-xl font-bold mb-4">📚 API Documentation</h2>
+                    <div class="space-y-2 text-sm">
+                        <p><strong>Backend API URL:</strong> <code class="bg-gray-100 px-2 py-1 rounded">http://localhost:8000</code></p>
+                        <p><strong>Swagger UI:</strong> <a href="http://localhost:8000/docs" target="_blank" class="text-blue-600 hover:underline">View Interactive Docs</a></p>
+                        <p><strong>ReDoc:</strong> <a href="http://localhost:8000/redoc" target="_blank" class="text-blue-600 hover:underline">View Documentation</a></p>
+                        <p class="text-xs text-gray-500 pt-2">
+                            This dashboard connects to your local backend API, which then connects to your Epicor server.
+                        </p>
+                        <div class="mt-4 p-3 bg-blue-50 rounded border-l-4 border-blue-600">
+                            <p class="text-blue-900 text-xs"><strong>💡 Tip:</strong> Click the links above to see all available API endpoints and try them interactively!</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Upload Tab -->
+        <div id="tab-content-upload" class="tab-content fade-in hidden">
+            <div class="bg-white rounded-lg shadow p-8">
+                <h2 class="text-2xl font-bold mb-6">📤 Upload Invoice</h2>
+                
+                <div class="border-2 border-dashed border-blue-300 rounded-lg p-12 text-center mb-6 bg-blue-50 cursor-pointer hover:border-blue-500 transition" onclick="document.getElementById('file-input').click()">
+                    <input type="file" id="file-input" accept=".pdf,.txt,.csv" onchange="handleFileUpload(event)" style="display:none;">
+                    <div class="text-5xl mb-3">📁</div>
+                    <h3 class="text-xl font-bold text-gray-800 mb-2">Drag and drop your invoice</h3>
+                    <p class="text-gray-600">or click to select file (PDF, TXT, CSV)</p>
+                    <p class="text-sm text-gray-500 mt-3">Max file size: 50MB</p>
+                </div>
+
+                <div id="upload-result" class="hidden mt-6">
+                    <div id="upload-spinner" class="flex justify-center mb-6">
+                        <div class="spinner"></div>
+                    </div>
+                    <div id="upload-status" class="hidden">
+                        <div class="bg-green-50 border border-green-200 rounded-lg p-4 mb-4">
+                            <h3 class="font-bold text-green-800 mb-2">✅ Invoice Processed</h3>
+                            <div id="invoice-details" class="text-sm text-gray-700 space-y-1"></div>
+                        </div>
+                        <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                            <h3 class="font-bold text-blue-800 mb-2">🤖 AI Match Result</h3>
+                            <div id="match-details" class="text-sm text-gray-700 space-y-1"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Pending Matches Tab -->
+        <div id="tab-content-matches" class="tab-content fade-in hidden">
+            <div class="bg-white rounded-lg shadow overflow-hidden">
+                <div class="p-6 border-b">
+                    <h2 class="text-2xl font-bold">✅ Pending Matches</h2>
+                    <p class="text-gray-600 text-sm">Invoices waiting for your approval</p>
+                </div>
+                <div id="matches-container" class="p-6">
+                    <div class="flex justify-center">
+                        <div class="spinner"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Purchase Orders Tab -->
+        <div id="tab-content-pos" class="tab-content fade-in hidden">
+            <div class="bg-white rounded-lg shadow overflow-hidden">
+                <div class="p-6 border-b">
+                    <div class="flex justify-between items-center">
+                        <div>
+                            <h2 class="text-2xl font-bold">📋 Purchase Orders</h2>
+                            <p class="text-gray-600 text-sm">Available POs from Epicor</p>
+                        </div>
+                        <button onclick="syncPOs()" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition">
+                            🔄 Refresh
+                        </button>
+                    </div>
+                </div>
+                <div id="pos-container" class="p-6">
+                    <div class="flex justify-center">
+                        <div class="spinner"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="bg-white border-t mt-12">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+            <div class="grid grid-cols-3 gap-8 mb-8">
+                <div>
+                    <h3 class="font-bold mb-2">📚 Documentation</h3>
+                    <ul class="text-sm text-gray-600 space-y-1">
+                        <li><a href="#" class="hover:text-blue-600">Quick Start Guide</a></li>
+                        <li><a href="#" class="hover:text-blue-600">API Documentation</a></li>
+                        <li><a href="#" class="hover:text-blue-600">Examples</a></li>
+                    </ul>
+                </div>
+                <div>
+                    <h3 class="font-bold mb-2">🔧 Tools</h3>
+                    <ul class="text-sm text-gray-600 space-y-1">
+                        <li><a href="http://localhost:8000/docs" target="_blank" class="hover:text-blue-600">Swagger API</a></li>
+                        <li><a href="http://localhost:8000/redoc" target="_blank" class="hover:text-blue-600">ReDoc</a></li>
+                        <li><a href="http://localhost:8000/health" target="_blank" class="hover:text-blue-600">Health Check</a></li>
+                    </ul>
+                </div>
+                <div>
+                    <h3 class="font-bold mb-2">ℹ️ Info</h3>
+                    <p class="text-sm text-gray-600">Invoice to PO Matching v1.0.0</p>
+                    <p class="text-sm text-gray-600">Powered by FastAPI & React</p>
+                </div>
+            </div>
+            <div class="border-t pt-6 text-center text-sm text-gray-600">
+                <p>🏆 Status: <span id="footer-status" class="font-bold text-green-600">Running</span></p>
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        const API_URL = 'http://localhost:8000/api';
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            if (typeof axios === 'undefined') {
+                alert("⚠️ Network Error: Unable to load required libraries. Please check your internet connection.");
+                return;
+            }
+            checkAPIStatus();
+            updateDashboardStats(); // Load stats immediately
+            setInterval(checkAPIStatus, 5000);
+            setInterval(updateDashboardStats, 5000); // Refresh stats every 5s
+        });
+
+        // Check API Status
+        async function checkAPIStatus() {
+            try {
+                const response = await axios.get('http://localhost:8000/health', { timeout: 2000 });
+                document.getElementById('api-status').innerHTML = '<span class="inline-block w-2 h-2 rounded-full bg-green-600 mr-2"></span>API Running';
+                document.getElementById('api-status').className = 'inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800';
+                document.getElementById('api-response').textContent = '✅ Connected';
+                document.getElementById('footer-status').textContent = 'Running';
+            } catch (error) {
+                document.getElementById('api-status').innerHTML = '<span class="inline-block w-2 h-2 rounded-full bg-red-600 mr-2"></span>API Offline';
+                document.getElementById('api-status').className = 'inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-red-100 text-red-800';
+                document.getElementById('api-response').textContent = '❌ ' + (error.message || 'Offline');
+                document.getElementById('footer-status').textContent = 'Offline';
+            }
+        }
+
+        // Update Dashboard Stats
+        async function updateDashboardStats() {
+            try {
+                // Get Pending Matches Count
+                const pendingRes = await axios.get(`${API_URL}/invoices/pending-matches`);
+                document.getElementById('stat-pending').textContent = pendingRes.data ? pendingRes.data.length : 0;
+
+                // Get POs Count
+                const posRes = await axios.get(`${API_URL}/purchase-orders`);
+                document.getElementById('stat-pos').textContent = posRes.data ? posRes.data.length : 0;
+                
+                // Note: Approved count would come from a different endpoint in a real app
+            } catch (error) {
+                console.log("Stats update failed (API might be offline)");
+            }
+        }
+
+        // Tab Navigation
+        function showTab(tabName) {
+            // Hide all tabs
+            document.querySelectorAll('.tab-content').forEach(tab => tab.classList.add('hidden'));
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active', 'bg-blue-600', 'text-white'));
+
+            // Show selected tab
+            document.getElementById(`tab-content-${tabName}`).classList.remove('hidden');
+            document.getElementById(`tab-${tabName}`).classList.add('active', 'bg-blue-600', 'text-white');
+
+            // Load data for tab
+            if (tabName === 'matches') loadPendingMatches();
+            if (tabName === 'pos') loadPurchaseOrders();
+        }
+
+        // Sync POs
+        async function syncPOs() {
+            try {
+                const response = await axios.get(`${API_URL}/purchase-orders/sync-from-epicor`);
+                alert('✅ POs synced successfully!');
+                loadPurchaseOrders();
+            } catch (error) {
+                alert('❌ Error syncing POs: ' + (error.response?.data?.detail || error.message));
+            }
+        }
+
+        // Upload File
+        async function handleFileUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            document.getElementById('upload-result').classList.remove('hidden');
+            document.getElementById('upload-status').classList.add('hidden');
+
+            try {
+                // Upload invoice
+                const uploadRes = await axios.post(`${API_URL}/invoices/upload`, formData);
+                
+                // Match invoice
+                const matchRes = await axios.post(`${API_URL}/invoices/match/${uploadRes.data.invoice_id}`);
+
+                // Show results
+                document.getElementById('upload-spinner').classList.add('hidden');
+                document.getElementById('upload-status').classList.remove('hidden');
+
+                document.getElementById('invoice-details').innerHTML = `
+                    <p><strong>Invoice #:</strong> ${uploadRes.data.invoice_number}</p>
+                    <p><strong>Vendor:</strong> ${uploadRes.data.vendor_name}</p>
+                    <p><strong>Amount:</strong> $${uploadRes.data.amount?.toFixed(2)}</p>
+                    <p><strong>Type:</strong> ${uploadRes.data.type}</p>
+                `;
+
+                if (matchRes.data.match_found) {
+                    const score = (matchRes.data.match_score * 100).toFixed(1);
+                    let scoreClass = score >= 80 ? 'match-high' : score >= 60 ? 'match-medium' : 'match-low';
+                    document.getElementById('match-details').innerHTML = `
+                        <p><strong>Matched PO:</strong> ${matchRes.data.po_number}</p>
+                        <p><strong>Confidence:</strong> <span class="match-badge ${scoreClass}">${score}%</span></p>
+                        <p><strong>Reasoning:</strong> ${matchRes.data.reasoning}</p>
+                    `;
+                } else {
+                    document.getElementById('match-details').innerHTML = `
+                        <p class="text-yellow-700">⚠️ ${matchRes.data.message}</p>
+                    `;
+                }
+
+                document.getElementById('file-input').value = '';
+            } catch (error) {
+                document.getElementById('upload-spinner').classList.add('hidden');
+                document.getElementById('upload-status').classList.remove('hidden');
+                document.getElementById('match-details').innerHTML = `
+                    <p class="text-red-700">❌ Error: ${error.response?.data?.detail || error.message}</p>
+                `;
+            }
+        }
+
+        // Load Pending Matches
+        async function loadPendingMatches() {
+            try {
+                const response = await axios.get(`${API_URL}/invoices/pending-matches`);
+                const matches = response.data || [];
+
+                if (matches.length === 0) {
+                    document.getElementById('matches-container').innerHTML = '<p class="text-gray-600 text-center py-8">No pending matches</p>';
+                    return;
+                }
+
+                let html = '<div class="space-y-4">';
+                matches.forEach(match => {
+                    const score = (match.score * 100).toFixed(1);
+                    let scoreClass = score >= 80 ? 'match-high' : score >= 60 ? 'match-medium' : 'match-low';
+                    html += `
+                        <div class="border rounded-lg p-4 hover:shadow-lg transition">
+                            <div class="flex justify-between items-start mb-3">
+                                <div>
+                                    <h3 class="font-bold text-lg">${match.invoice_number}</h3>
+                                    <p class="text-gray-600 text-sm">→ ${match.po_number}</p>
+                                </div>
+                                <span class="match-badge ${scoreClass}">${score}%</span>
+                            </div>
+                            <p class="text-gray-700 text-sm mb-3"><strong>Amount:</strong> $${match.amount?.toFixed(2)}</p>
+                            <p class="text-gray-700 text-sm mb-4"><strong>Reasoning:</strong> ${match.reasoning}</p>
+                            <button onclick="approveMatch('${match.match_id}')" class="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 transition">
+                                ✅ Approve
+                            </button>
+                        </div>
+                    `;
+                });
+                html += '</div>';
+                document.getElementById('matches-container').innerHTML = html;
+            } catch (error) {
+                document.getElementById('matches-container').innerHTML = `<p class="text-red-600">❌ Error loading matches: ${error.message}</p>`;
+            }
+        }
+
+        // Load Purchase Orders
+        async function loadPurchaseOrders() {
+            try {
+                const response = await axios.get(`${API_URL}/purchase-orders`);
+                const pos = response.data || [];
+
+                if (pos.length === 0) {
+                    document.getElementById('pos-container').innerHTML = '<p class="text-gray-600 text-center py-8">No purchase orders</p>';
+                    return;
+                }
+
+                let html = `
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm">
+                            <thead class="bg-gray-100">
+                                <tr>
+                                    <th class="px-4 py-2 text-left font-bold">PO #</th>
+                                    <th class="px-4 py-2 text-left font-bold">Vendor</th>
+                                    <th class="px-4 py-2 text-left font-bold">Description</th>
+                                    <th class="px-4 py-2 text-right font-bold">Amount</th>
+                                    <th class="px-4 py-2 text-right font-bold">Remaining</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                `;
+                
+                pos.forEach(po => {
+                    html += `
+                        <tr class="border-b hover:bg-gray-50">
+                            <td class="px-4 py-3 font-medium">${po.po_number}</td>
+                            <td class="px-4 py-3">${po.vendor_name}</td>
+                            <td class="px-4 py-3 text-gray-600">${po.description}</td>
+                            <td class="px-4 py-3 text-right">$${po.line_amount?.toFixed(2)}</td>
+                            <td class="px-4 py-3 text-right font-medium text-green-600">$${po.remaining_amount?.toFixed(2)}</td>
+                        </tr>
+                    `;
+                });
+
+                html += '</tbody></table></div>';
+                document.getElementById('pos-container').innerHTML = html;
+            } catch (error) {
+                document.getElementById('pos-container').innerHTML = `<p class="text-red-600">❌ Error loading POs: ${error.message}</p>`;
+            }
+        }
+
+        // Approve Match
+        async function approveMatch(matchId) {
+            try {
+                await axios.post(`${API_URL}/invoices/${matchId}/approve`);
+                alert('✅ Match approved!');
+                loadPendingMatches();
+            } catch (error) {
+                alert('❌ Error approving match: ' + error.message);
+            }
+        }
+    </script>
+</body>
+</html>

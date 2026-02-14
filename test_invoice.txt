@@ -1,0 +1,25 @@
+ACME Corporation
+Invoice Department
+
+Invoice Number: INV-2024-001001
+Invoice Date: 02/10/2024
+Due Date: 03/10/2024
+
+Bill To:
+Your Company
+Chicago, IL
+
+Line Items:
+Description: Office Supplies
+Quantity: 100
+Price per Unit: 25.00
+Total: 2500.00
+
+Shipping: 50.00
+
+Subtotal: 2550.00
+Tax (8%): 204.00
+
+TOTAL AMOUNT DUE: 2754.00
+
+Purchase Order Reference: PO-2024-1001

@@ -114,6 +114,14 @@
                 <div class="bg-white rounded-lg shadow p-6">
                     <h3 class="text-lg font-bold mb-4">📄 Preview</h3>
                     
+                    <!-- Mode & Instructions -->
+                    <div id="mode-info" class="bg-blue-50 p-3 rounded mb-4 text-sm">
+                        <p class="font-bold">Mode: <span id="current-mode-display">Manual</span></p>
+                        <p class="text-xs text-gray-700 mt-1" id="mode-instructions">
+                            Manual Mode: Scroll down and highlight text on the RIGHT side to select fields
+                        </p>
+                    </div>
+                    
                     <!-- Zoom Controls -->
                     <div class="flex gap-2 mb-4 items-center">
                         <button onclick="zoomOut()" class="bg-gray-600 text-white px-3 py-1 rounded hover:bg-gray-700 transition text-sm">🔍- Zoom Out</button>
@@ -123,7 +131,7 @@
                     </div>
                     
                     <!-- Image/PDF Container with Scrolling -->
-                    <div id="preview-container" class="bg-gray-100 rounded p-4 flex items-center justify-center overflow-auto" style="min-height: 500px; cursor: grab;">
+                    <div id="preview-container" class="bg-gray-100 rounded p-4 flex items-center justify-center overflow-auto relative" style="min-height: 500px; cursor: grab;">
                         <div class="spinner"></div>
                     </div>
                 </div>
@@ -372,6 +380,165 @@
 
         // Zoom and Pan Functions
         let currentZoom = 1;
+
+// Update mode display
+function updateModeDisplay() {
+    const modeDisplay = document.getElementById('current-mode-display');
+    const modeInstructions = document.getElementById('mode-instructions');
+    if (modeDisplay) {
+        modeDisplay.textContent = currentMode === 'manual' ? 'Manual Selection' : 'Auto OCR';
+        if (currentMode === 'manual') {
+            modeInstructions.textContent = '✋ Manual Mode: Highlight text on RIGHT side OR draw boxes on image by clicking and dragging (for images only)';
+        } else {
+            modeInstructions.textContent = '🤖 Auto OCR Mode: Click "Run OCR" button to extract text automatically';
+        }
+    }
+}
+
+// Helper to convert image element to canvas for area extraction
+async function extractTextFromImageArea(x, y, width, height) {
+    const img = document.querySelector('#preview-container img');
+    if (!img) return '';
+    
+    try {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        // Scale coordinates back to original image size (accounting for zoom)
+        const originalX = x / currentZoom;
+        const originalY = y / currentZoom;
+        const originalWidth = width / currentZoom;
+        const originalHeight = height / currentZoom;
+        
+        canvas.width = Math.max(originalWidth, 50);
+        canvas.height = Math.max(originalHeight, 50);
+        
+        // Draw the selected region
+        ctx.drawImage(
+            img,
+            originalX, originalY, originalWidth, originalHeight,
+            0, 0, canvas.width, canvas.height
+        );
+        
+        // Use Tesseract to OCR just this region
+        if (typeof Tesseract === 'undefined') {
+            document.getElementById('extracted-text').textContent += '\n\n[Area] OCR not available. Using Tesseract.js library.';
+            return 'Area selected but OCR library not ready';
+        }
+        
+        const result = await Tesseract.recognize(canvas, 'eng');
+        const selectedText = result.data.text.trim();
+        return selectedText || '[Empty area - no text detected]';
+    } catch (error) {
+        console.error('Area extraction error:', error);
+        return `[Area extraction error: ${error.message}]`;
+    }
+}
+
+// Add canvas overlay for manual area selection on images
+function addImageSelectionOverlay() {
+    const container = document.getElementById('preview-container');
+    const img = container.querySelector('img');
+    
+    if (!img || currentMode !== 'manual') return;
+    
+    // Remove existing canvas if any
+    const existingCanvas = container.querySelector('canvas.selection-overlay');
+    if (existingCanvas) existingCanvas.remove();
+    
+    // Create canvas overlay
+    const canvas = document.createElement('canvas');
+    canvas.classList.add('selection-overlay');
+    canvas.style.position = 'absolute';
+    canvas.style.top = img.offsetTop + 'px';
+    canvas.style.left = img.offsetLeft + 'px';
+    canvas.style.cursor = 'crosshair';
+    canvas.style.border = '2px dashed rgba(59, 130, 246, 0.5)';
+    canvas.style.borderRadius = '4px';
+    
+    canvas.width = img.offsetWidth;
+    canvas.height = img.offsetHeight;
+    
+    const ctx = canvas.getContext('2d');
+    let isDrawing = false;
+    let startX, startY;
+    
+    const drawRectangle = (x1, y1, x2, y2) => {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.strokeStyle = 'rgb(59, 130, 246)';
+        ctx.lineWidth = 2;
+        ctx.fillStyle = 'rgba(59, 130, 246, 0.1)';
+        
+        const x = Math.min(x1, x2);
+        const y = Math.min(y1, y2);
+        const width = Math.abs(x2 - x1);
+        const height = Math.abs(y2 - y1);
+        
+        ctx.fillRect(x, y, width, height);
+        ctx.strokeRect(x, y, width, height);
+    };
+    
+    canvas.addEventListener('mousedown', (e) => {
+        isDrawing = true;
+        startX = e.offsetX;
+        startY = e.offsetY;
+    });
+    
+    canvas.addEventListener('mousemove', (e) => {
+        if (!isDrawing) return;
+        drawRectangle(startX, startY, e.offsetX, e.offsetY);
+    });
+    
+    canvas.addEventListener('mouseup', async (e) => {
+        if (!isDrawing) return;
+        isDrawing = false;
+        
+        const endX = e.offsetX;
+        const endY = e.offsetY;
+        const selectionWidth = Math.abs(endX - startX);
+        const selectionHeight = Math.abs(endY - startY);
+        
+        if (selectionWidth < 10 || selectionHeight < 10) {
+            alert('⚠️ Selection too small. Please drag a larger area.');
+            return;
+        }
+        
+        // Update mode info
+        const modeInfo = document.getElementById('mode-info');
+        modeInfo.innerHTML = `<p class="font-bold">📍 Extracting text from selected area...</p>`;
+        
+        try {
+            const text = await extractTextFromImageArea(
+                Math.min(startX, endX),
+                Math.min(startY, endY),
+                selectionWidth,
+                selectionHeight
+            );
+            
+            if (text) {
+                // Add extracted text to content area with visual marker
+                const textArea = document.getElementById('extracted-text');
+                textArea.textContent += '\n\n[SELECTED AREA]\n' + text;
+                
+                // Show mapping modal for this text
+                if (text !== '[Empty area - no text detected]' && !text.includes('error')) {
+                    showFieldMappingModal(text);
+                }
+                
+                // Update mode info
+                modeInfo.innerHTML = `<p class="font-bold text-green-700">✅ Area extracted! Scroll down to map fields.</p>`;
+            }
+        } catch (error) {
+            modeInfo.innerHTML = `<p class="font-bold text-red-700">❌ Error: ${error.message}</p>`;
+        }
+        
+        // Clear canvas
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+    });
+    
+    container.style.position = 'relative';
+    container.appendChild(canvas);
+}
         function zoomIn() {
             currentZoom += 0.2;
             applyZoom();
@@ -400,6 +567,12 @@
             document.getElementById('mode-manual-btn').classList.toggle('border-blue-300', mode === 'manual');
             document.getElementById('mode-ocr-btn').classList.toggle('bg-purple-50', mode === 'ocr');
             document.getElementById('mode-ocr-btn').classList.toggle('border-purple-300', mode === 'ocr');
+            updateModeDisplay();
+            
+            // If image is loaded, update overlay
+            if (document.getElementById('preview-container').querySelector('img')) {
+                setTimeout(() => addImageSelectionOverlay(), 100);
+            }
         }
 
         // File Upload
@@ -480,7 +653,15 @@
                 currentZoom = 1;
                 document.getElementById('zoom-level').textContent = '100%';
                 extractedContent = '[Image loaded]';
-                document.getElementById('extracted-text').textContent = 'Image file selected. Use OCR mode or manually highlight fields.';
+                
+                // Update instructions based on mode
+                if (currentMode === 'manual') {
+                    document.getElementById('extracted-text').textContent = '📄 Image loaded. Draw boxes on image to select field areas (left), text will appear on right.';
+                    // Add selection overlay for manual mode
+                    setTimeout(() => addImageSelectionOverlay(), 100);
+                } else {
+                    document.getElementById('extracted-text').textContent = 'Image file selected. Click "Run OCR" to extract text.';
+                }
             };
             reader.readAsDataURL(file);
         }

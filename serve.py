@@ -5,7 +5,7 @@ import socketserver
 import os
 from pathlib import Path
 
-PORT = 8080
+PORT = 8081
 DIRECTORY = str(Path(__file__).parent)
 
 class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):

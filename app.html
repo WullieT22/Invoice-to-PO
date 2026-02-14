@@ -321,7 +321,7 @@
         let batchFiles = [];
         let batchResults = { successful: 0, matched: 0, errors: 0 };
 
-        const API_URL = 'http://localhost:8000/api';
+        const API_URL = 'http://172.11.0.4:8888/api';
         const BAQ_FIELDS = [
             'invoice_number', 'invoice_date', 'vendor_name', 'vendor_id',
             'po_number', 'invoice_amount', 'line_amount', 'description',
@@ -350,7 +350,7 @@
         // Check API Status
         async function checkAPIStatus() {
             try {
-                const response = await axios.get('http://localhost:8000/health', { timeout: 2000 });
+                const response = await axios.get('http://172.11.0.4:8888/health', { timeout: 2000 });
                 document.getElementById('api-status').innerHTML = '<span class="inline-block w-2 h-2 rounded-full bg-green-600 mr-2"></span>API Running';
                 document.getElementById('api-status').className = 'inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800';
             } catch (error) {

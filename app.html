@@ -529,12 +529,34 @@ function addImageSelectionOverlay() {
     const ctx = canvas.getContext('2d');
     let isDrawing = false;
     let startX, startY;
+    let selectionHistory = [];  // Track all selections
+    let selectionCount = 0;
     
-    const drawRectangle = (x1, y1, x2, y2) => {
+    const colors = ['#3B82F6', '#EF4444', '#10B981', '#F59E0B', '#8B5CF6', '#EC4899'];
+    
+    const drawRectangle = (x1, y1, x2, y2, color = 'rgb(59, 130, 246)') => {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.strokeStyle = 'rgb(59, 130, 246)';
+        
+        // Redraw all previous selections in light color
+        selectionHistory.forEach(sel => {
+            ctx.strokeStyle = sel.color;
+            ctx.lineWidth = 1;
+            ctx.globalAlpha = 0.3;
+            ctx.strokeRect(sel.x, sel.y, sel.w, sel.h);
+            
+            // Draw selection number
+            ctx.fillStyle = sel.color;
+            ctx.font = 'bold 12px Arial';
+            ctx.globalAlpha = 0.7;
+            ctx.fillText('[' + sel.num + ']', sel.x + 5, sel.y + 15);
+            ctx.globalAlpha = 1;
+        });
+        
+        // Draw current selection
+        ctx.strokeStyle = color;
         ctx.lineWidth = 3;
-        ctx.fillStyle = 'rgba(59, 130, 246, 0.15)';
+        ctx.fillStyle = color;
+        ctx.globalAlpha = 0.15;
         
         const x = Math.min(x1, x2);
         const y = Math.min(y1, y2);
@@ -542,6 +564,7 @@ function addImageSelectionOverlay() {
         const height = Math.abs(y2 - y1);
         
         ctx.fillRect(x, y, width, height);
+        ctx.globalAlpha = 1;
         ctx.strokeRect(x, y, width, height);
     };
     
@@ -574,9 +597,12 @@ function addImageSelectionOverlay() {
             return;
         }
         
+        selectionCount++;
+        const currentColor = colors[selectionCount % colors.length];
+        
         // Update mode info
         const modeInfo = document.getElementById('mode-info');
-        modeInfo.innerHTML = `<p class="font-bold">📍 Extracting text from selected area...</p>`;
+        modeInfo.innerHTML = `<p class="font-bold">📍 Selection #${selectionCount} - Extracting text...</p>`;
         
         try {
             const text = await extractTextFromImageArea(
@@ -587,15 +613,30 @@ function addImageSelectionOverlay() {
             );
             
             if (text) {
-                // Add extracted text to accumulated content
-                if (extractedContent && !extractedContent.includes('[Image loaded]')) {
-                    extractedContent += '\n\n--- SELECTED AREA ---\n' + text;
-                } else {
-                    extractedContent = text;
-                }
+                // Store selection info
+                selectionHistory.push({
+                    num: selectionCount,
+                    x: Math.min(startX, endX),
+                    y: Math.min(startY, endY),
+                    w: selectionWidth,
+                    h: selectionHeight,
+                    color: currentColor,
+                    text: text
+                });
                 
-                // Display formatted content
-                displayExtractedText(extractedContent);
+                // Add extracted text with selection marker
+                if (extractedContent && !extractedContent.includes('[Image loaded]')) {
+                    extractedContent += '\n\n';
+                } else {
+                    extractedContent = '';
+                }
+                extractedContent += `[SELECTION #${selectionCount}]\n${text}`;
+                
+                // Display with highlighting
+                displayExtractedTextWithSelections(extractedContent, selectionHistory);
+                
+                // Redraw all selections on canvas
+                drawRectangle(-999, -999, -1000, -1000);  // This will just redraw history
                 
                 // Show mapping modal for this text
                 if (text !== '[Empty area - no text detected]' && !text.includes('error')) {
@@ -603,14 +644,11 @@ function addImageSelectionOverlay() {
                 }
                 
                 // Update mode info
-                modeInfo.innerHTML = `<p class="font-bold text-green-700">✅ Area extracted! Scroll down to map fields.</p>`;
+                modeInfo.innerHTML = `<p class="font-bold text-green-700">✅ Selection #${selectionCount} extracted! Keep selecting or map fields below.</p>`;
             }
         } catch (error) {
             modeInfo.innerHTML = `<p class="font-bold text-red-700">❌ Error: ${error.message}</p>`;
         }
-        
-        // Clear canvas for next selection
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
     });
     
     canvas.addEventListener('mouseleave', () => {
@@ -922,6 +960,31 @@ function addImageSelectionOverlay() {
                 "'": '&#039;'
             };
             return text.replace(/[&<>"']/g, m => map[m]);
+        }
+        
+        // Display extracted text with color-coded selections
+        function displayExtractedTextWithSelections(text, selections) {
+            let html = '<div class="invoice-document">';
+            
+            // Split by selection markers
+            const sections = text.split(/\[SELECTION #(\d+)\]/).slice(1);  // Skip first empty element
+            
+            for (let i = 0; i < sections.length; i += 2) {
+                const selNum = parseInt(sections[i]);
+                const selText = sections[i + 1] ? sections[i + 1].trim() : '';
+                const selection = selections ? selections.find(s => s.num === selNum) : null;
+                const color = selection ? selection.color : '#3B82F6';
+                
+                if (selText) {
+                    html += `<div style="border-left: 5px solid ${color}; padding: 12px; margin: 12px 0; background: ${color}20; border-radius: 4px;">`;
+                    html += `<p style="margin: 0 0 8px 0; font-weight: bold; color: ${color};">📍 Selection #${selNum}</p>`;
+                    html += `<pre style="margin: 0; font-family: Arial, sans-serif; white-space: pre-wrap; word-break: break-word; color: #1a1a1a; font-size: 14px; line-height: 1.6;">${escapeHtml(selText)}</pre>`;
+                    html += `</div>`;
+                }
+            }
+            
+            html += '</div>';
+            document.getElementById('extracted-text').innerHTML = html;
         }
 
         // Display extracted text with better formatting

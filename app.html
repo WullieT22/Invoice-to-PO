@@ -366,6 +366,14 @@
             document.getElementById('mode-manual-btn').classList.toggle('border-blue-300', mode === 'manual');
             document.getElementById('mode-ocr-btn').classList.toggle('bg-purple-50', mode === 'ocr');
             document.getElementById('mode-ocr-btn').classList.toggle('border-purple-300', mode === 'ocr');
+            
+            // Add overlay if manual mode and image exists
+            if (mode === 'manual') {
+                const img = document.querySelector('#preview-container img');
+                if (img) {
+                    addImageSelectionOverlay();
+                }
+            }
         }
 
         // File Upload
@@ -440,6 +448,11 @@
                 document.getElementById('preview-container').appendChild(img);
                 extractedContent = '[Image loaded]';
                 document.getElementById('extracted-text').textContent = 'Image file selected. Use OCR mode or manually highlight fields.';
+                
+                // Create selection overlay if in manual mode
+                if (currentMode === 'manual') {
+                    setTimeout(() => addImageSelectionOverlay(), 100); // Small delay to ensure DOM is ready
+                }
             };
             reader.readAsDataURL(file);
         }

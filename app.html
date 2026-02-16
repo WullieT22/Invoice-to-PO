@@ -397,41 +397,64 @@ function updateModeDisplay() {
 
 // Helper to convert image element to canvas for area extraction
 async function extractTextFromImageArea(x, y, width, height) {
+    const container = document.getElementById('preview-container');
     const img = document.querySelector('#preview-container img');
     if (!img) return '';
     
     try {
+        // Get actual image dimensions and position
+        const imgRect = img.getBoundingClientRect();
+        const containerRect = container.getBoundingClientRect();
+        
+        // Calculate relative position within the image
+        const relativeX = x - (imgRect.left - containerRect.left);
+        const relativeY = y - (imgRect.top - containerRect.top);
+        
+        // Get natural image dimensions
+        const naturalWidth = img.naturalWidth;
+        const naturalHeight = img.naturalHeight;
+        
+        // Calculate scale factors
+        const scaleX = naturalWidth / imgRect.width;
+        const scaleY = naturalHeight / imgRect.height;
+        
+        // Convert selection coordinates to original image coordinates
+        const originalX = Math.max(0, relativeX * scaleX);
+        const originalY = Math.max(0, relativeY * scaleY);
+        const originalWidth = Math.max(50, width * scaleX);
+        const originalHeight = Math.max(50, height * scaleY);
+        
+        console.log('Image extraction:', {relativeX, relativeY, imgRect, scale: [scaleX, scaleY], original: [originalX, originalY, originalWidth, originalHeight]});
+        
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
         
-        // Scale coordinates back to original image size (accounting for zoom)
-        const originalX = x / currentZoom;
-        const originalY = y / currentZoom;
-        const originalWidth = width / currentZoom;
-        const originalHeight = height / currentZoom;
+        canvas.width = originalWidth;
+        canvas.height = originalHeight;
         
-        canvas.width = Math.max(originalWidth, 50);
-        canvas.height = Math.max(originalHeight, 50);
-        
-        // Draw the selected region
+        // Draw the selected region from original image
         ctx.drawImage(
             img,
             originalX, originalY, originalWidth, originalHeight,
             0, 0, canvas.width, canvas.height
         );
         
-        // Use Tesseract to OCR just this region
+        // Use Tesseract to OCR the region
         if (typeof Tesseract === 'undefined') {
-            document.getElementById('extracted-text').textContent += '\n\n[Area] OCR not available. Using Tesseract.js library.';
-            return 'Area selected but OCR library not ready';
+            return 'OCR library not loaded - try refreshing page';
         }
         
-        const result = await Tesseract.recognize(canvas, 'eng');
+        document.getElementById('mode-info').innerHTML = `<p class="font-bold">🔍 Running OCR on selected area...</p>`;
+        
+        const result = await Tesseract.recognize(canvas, 'eng', {
+            logger: (m) => console.log('OCR Progress:', m.status, Math.round(m.progress * 100) + '%')
+        });
+        
         const selectedText = result.data.text.trim();
         return selectedText || '[Empty area - no text detected]';
     } catch (error) {
         console.error('Area extraction error:', error);
-        return `[Area extraction error: ${error.message}]`;
+        return `[Error: ${error.message}]`;
     }
 }
 
@@ -446,18 +469,22 @@ function addImageSelectionOverlay() {
     const existingCanvas = container.querySelector('canvas.selection-overlay');
     if (existingCanvas) existingCanvas.remove();
     
-    // Create canvas overlay
+    // Ensure container is positioned relatively
+    container.style.position = 'relative';
+    
+    // Create canvas overlay - must be on top of image
     const canvas = document.createElement('canvas');
     canvas.classList.add('selection-overlay');
     canvas.style.position = 'absolute';
-    canvas.style.top = img.offsetTop + 'px';
-    canvas.style.left = img.offsetLeft + 'px';
+    canvas.style.top = '0';
+    canvas.style.left = '0';
     canvas.style.cursor = 'crosshair';
-    canvas.style.border = '2px dashed rgba(59, 130, 246, 0.5)';
-    canvas.style.borderRadius = '4px';
+    canvas.style.zIndex = '10';
+    canvas.style.display = 'block';
     
-    canvas.width = img.offsetWidth;
-    canvas.height = img.offsetHeight;
+    // Size canvas to match container, not image
+    canvas.width = container.offsetWidth;
+    canvas.height = container.offsetHeight;
     
     const ctx = canvas.getContext('2d');
     let isDrawing = false;
@@ -466,8 +493,8 @@ function addImageSelectionOverlay() {
     const drawRectangle = (x1, y1, x2, y2) => {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.strokeStyle = 'rgb(59, 130, 246)';
-        ctx.lineWidth = 2;
-        ctx.fillStyle = 'rgba(59, 130, 246, 0.1)';
+        ctx.lineWidth = 3;
+        ctx.fillStyle = 'rgba(59, 130, 246, 0.15)';
         
         const x = Math.min(x1, x2);
         const y = Math.min(y1, y2);
@@ -482,6 +509,7 @@ function addImageSelectionOverlay() {
         isDrawing = true;
         startX = e.offsetX;
         startY = e.offsetY;
+        console.log('Selection started at:', startX, startY);
     });
     
     canvas.addEventListener('mousemove', (e) => {
@@ -498,8 +526,11 @@ function addImageSelectionOverlay() {
         const selectionWidth = Math.abs(endX - startX);
         const selectionHeight = Math.abs(endY - startY);
         
+        console.log('Selection completed:', {startX, startY, endX, endY, width: selectionWidth, height: selectionHeight});
+        
         if (selectionWidth < 10 || selectionHeight < 10) {
             alert('⚠️ Selection too small. Please drag a larger area.');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
             return;
         }
         
@@ -532,12 +563,19 @@ function addImageSelectionOverlay() {
             modeInfo.innerHTML = `<p class="font-bold text-red-700">❌ Error: ${error.message}</p>`;
         }
         
-        // Clear canvas
+        // Clear canvas for next selection
         ctx.clearRect(0, 0, canvas.width, canvas.height);
     });
     
-    container.style.position = 'relative';
+    canvas.addEventListener('mouseleave', () => {
+        if (isDrawing) {
+            isDrawing = false;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+        }
+    });
+    
     container.appendChild(canvas);
+    console.log('Selection overlay added. Canvas size:', canvas.width, 'x', canvas.height);
 }
         function zoomIn() {
             currentZoom += 0.2;
@@ -648,6 +686,10 @@ function addImageSelectionOverlay() {
                 img.style.maxWidth = '100%';
                 img.style.height = 'auto';
                 img.style.transformOrigin = 'center';
+                img.style.display = 'block';
+                img.style.margin = '0 auto';
+                img.style.pointerEvents = 'none';  // Allow canvas to capture events
+                
                 document.getElementById('preview-container').innerHTML = '';
                 document.getElementById('preview-container').appendChild(img);
                 currentZoom = 1;

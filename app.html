@@ -25,6 +25,19 @@
         .progress-fill { height: 100%; background: linear-gradient(90deg, #3B82F6, #8B5CF6); width: 0%; transition: width 0.3s; }
         .template-tag { display: inline-block; background: #3B82F6; color: white; padding: 4px 8px; border-radius: 4px; font-size: 12px; margin: 2px; }
         #preview-container img, #preview-container canvas { transform-origin: center; transition: transform 0.2s ease; max-width: 100%; }
+        #extracted-text { 
+            background: white; 
+            color: #1a1a1a;
+            line-height: 2;
+            letter-spacing: 0.5px;
+            font-size: 15px;
+            padding: 24px;
+            border: 1px solid #ddd;
+        }
+        #extracted-text::selection { 
+            background: #3B82F6; 
+            color: white;
+        }
     </style>
 </head>
 <body class="bg-gradient-to-br from-slate-50 to-slate-100">
@@ -138,13 +151,13 @@
 
                 <!-- Extracted/OCR Text -->
                 <div class="bg-white rounded-lg shadow p-6">
-                    <h3 class="text-lg font-bold mb-4">📋 Content</h3>
-                    <div id="extracted-text" class="bg-gray-50 p-6 rounded text-base max-h-96 overflow-y-auto border-2 border-gray-300 hover:border-blue-300 transition" 
-                         title="Click to highlight text" 
-                         style="line-height: 1.8; font-family: Arial, sans-serif; white-space: pre-wrap; word-wrap: break-word; user-select: text; cursor: text;">
+                    <h3 class="text-lg font-bold mb-4">📋 Extracted Content (Compare with Invoice)</h3>
+                    <div id="extracted-text" class="bg-gradient-to-br from-white to-gray-50 rounded border-2 border-gray-300 max-h-96 overflow-y-auto" 
+                         title="Click to select text" 
+                         style="min-height: 400px;">
                          
                     </div>
-                    <p class="text-xs text-gray-500 mt-2">💡 Tip: Highlight text to map fields, or draw boxes on the image to select areas.</p>
+                    <p class="text-xs text-gray-500 mt-2">💡 Click and drag on left image to select areas, or highlight text here to map fields</p>
                 </div>
             </div>
 

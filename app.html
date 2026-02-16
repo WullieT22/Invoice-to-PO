@@ -38,6 +38,29 @@
             background: #3B82F6; 
             color: white;
         }
+        .invoice-document {
+            font-family: 'Courier New', monospace;
+            background: white;
+            padding: 20px;
+            border-radius: 4px;
+        }
+        .invoice-document table {
+            width: 100%;
+        }
+        .invoice-document td, .invoice-document th {
+            padding: 10px;
+            text-align: left;
+        }
+        .invoice-detail {
+            padding: 4px 0;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+        .invoice-document pre {
+            font-size: 12px;
+            line-height: 1.4;
+            color: #666;
+        }
     </style>
 </head>
 <body class="bg-gradient-to-br from-slate-50 to-slate-100">
@@ -564,9 +587,15 @@ function addImageSelectionOverlay() {
             );
             
             if (text) {
-                // Add extracted text to content area with visual marker
-                const textArea = document.getElementById('extracted-text');
-                textArea.textContent += '\n\n[SELECTED AREA]\n' + text;
+                // Add extracted text to accumulated content
+                if (extractedContent && !extractedContent.includes('[Image loaded]')) {
+                    extractedContent += '\n\n--- SELECTED AREA ---\n' + text;
+                } else {
+                    extractedContent = text;
+                }
+                
+                // Display formatted content
+                displayExtractedText(extractedContent);
                 
                 // Show mapping modal for this text
                 if (text !== '[Empty area - no text detected]' && !text.includes('error')) {
@@ -691,7 +720,7 @@ function addImageSelectionOverlay() {
 
             const textContent = await page.getTextContent();
             extractedContent = textContent.items.map(item => item.str).join(' ');
-            document.getElementById('extracted-text').textContent = extractedContent;
+            displayExtractedText(extractedContent);
         }
 
         // Load Image
@@ -715,11 +744,11 @@ function addImageSelectionOverlay() {
                 
                 // Update instructions based on mode
                 if (currentMode === 'manual') {
-                    document.getElementById('extracted-text').textContent = '📄 Image loaded. Draw boxes on image to select field areas (left), text will appear on right.';
+                    document.getElementById('extracted-text').innerHTML = '<div style="color: #666; padding: 20px;">📄 Image loaded. Draw boxes on image to select field areas (left), text will appear on right.</div>';
                     // Add selection overlay for manual mode
                     setTimeout(() => addImageSelectionOverlay(), 100);
                 } else {
-                    document.getElementById('extracted-text').textContent = 'Image file selected. Click "Run OCR" to extract text.';
+                    document.getElementById('extracted-text').innerHTML = '<div style="color: #666; padding: 20px;">🤖 Image file selected. Click "Run OCR" to extract text.</div>';
                 }
             };
             reader.readAsDataURL(file);
@@ -734,7 +763,7 @@ function addImageSelectionOverlay() {
 
         // Run OCR
         async function runOCR() {
-            document.getElementById('extracted-text').textContent = '🔍 Running OCR... (this may take 30-60 seconds)';
+            document.getElementById('extracted-text').innerHTML = '<div style="color: #666; padding: 20px; text-align: center;"><p>🔍 Running OCR...</p><p style="font-size: 12px;">This may take 30-60 seconds depending on image size and complexity.</p></div>';
             try {
                 // Convert file to data URL for Tesseract
                 const reader = new FileReader();
@@ -752,89 +781,153 @@ function addImageSelectionOverlay() {
                         );
                         
                         extractedContent = result.data.text;
-                        document.getElementById('extracted-text').textContent = extractedContent;
                         detectAndAddMappings(extractedContent);
                     } catch (error) {
                         console.error('OCR Error:', error);
-                        document.getElementById('extracted-text').textContent = '❌ OCR Error: ' + (error.message || 'Unknown error occurred');
+                        document.getElementById('extracted-text').innerHTML = '<div style="color: #dc2626; padding: 20px;"><strong>❌ OCR Error:</strong> ' + escapeHtml(error.message || 'Unknown error occurred') + '</div>';
                     }
                 };
                 reader.readAsDataURL(currentFile);
             } catch (error) {
                 console.error('OCR Setup Error:', error);
-                document.getElementById('extracted-text').textContent = '❌ OCR Error: ' + error.message;
+                document.getElementById('extracted-text').innerHTML = '<div style="color: #dc2626; padding: 20px;"><strong>❌ OCR Error:</strong> ' + escapeHtml(error.message) + '</div>';
             }
         }
 
-        // Format extracted text for better readability
+        // Format extracted text as an invoice document layout
         function formatExtractedText(text) {
-            if (!text) return '';
+            if (!text) return '<p class="text-gray-500">No content</p>';
             
-            // Split into lines and clean up
+            let html = '<div class="invoice-document">';
             let lines = text.split('\n').map(line => line.trim()).filter(line => line.length > 0);
             
-            let formatted = [];
-            let currentSection = [];
-            let inLineItems = false;
-            let lineItemCount = 0;
+            let headerInfo = {};
+            let lineItems = [];
+            let totalsInfo = {};
+            let currentSection = 'header';
             
             for (let line of lines) {
-                // Detect sections
-                if (line.toUpperCase().includes('INVOICE') || line.toUpperCase().includes('BILL')) {
-                    if (currentSection.length > 0) {
-                        formatted.push(currentSection.join('\n'));
-                        currentSection = [];
+                const upper = line.toUpperCase();
+                
+                // Detect section headers
+                if (upper.includes('INVOICE') || upper.includes('BILL')) {
+                    currentSection = 'header';
+                    headerInfo.title = line;
+                } else if (upper.includes('ITEM') || upper.includes('DESCRIPTION') || upper.includes('QTY')) {
+                    currentSection = 'items';
+                } else if (upper.includes('TOTAL') || upper.includes('SUBTOTAL') || upper.includes('TAX')) {
+                    currentSection = 'totals';
+                    totalsInfo[line.split(':')[0].trim()] = line.split(':')[1]?.trim() || '';
+                }
+                
+                // Parse header info
+                if (currentSection === 'header') {
+                    if (upper.includes('INVOICE #') || upper.includes('INVOICE NO') || upper.includes('INV #')) {
+                        headerInfo.invoiceNum = line;
+                    } else if (upper.includes('DATE') && !upper.includes('DUE')) {
+                        headerInfo.invoiceDate = line;
+                    } else if (upper.includes('VENDOR') || upper.includes('FROM') || upper.includes('SUPPLIER')) {
+                        headerInfo.vendor = line;
+                    } else if (upper.includes('PO ') || upper.includes('P.O.') || upper.includes('PURCHASE ORDER')) {
+                        headerInfo.poNumber = line;
                     }
-                    formatted.push('─'.repeat(50));
-                    formatted.push('📄 ' + line.toUpperCase());
-                    formatted.push('─'.repeat(50));
-                    inLineItems = false;
-                } else if (line.toUpperCase().includes('DATE') || line.toUpperCase().includes('AMOUNT') || 
-                          line.toUpperCase().includes('VENDOR') || line.toUpperCase().includes('FROM')) {
-                    if (currentSection.length > 0 && !inLineItems) {
-                        currentSection.push('');
+                }
+                
+                // Parse line items
+                if (currentSection === 'items' && !upper.includes('ITEM') && !upper.includes('DESCRIPTION')) {
+                    if (line && !line.includes('─')) {
+                        lineItems.push(line);
                     }
-                    currentSection.push('  ' + line);
-                } else if (line.toUpperCase().includes('ITEM') || line.toUpperCase().includes('DESCRIPTION') || 
-                          line.toUpperCase().includes('QTY') || line.toUpperCase().includes('PRICE') ||
-                          line.toUpperCase().includes('LINE')) {
-                    if (currentSection.length > 0) {
-                        formatted.push(currentSection.join('\n'));
-                        currentSection = [];
-                    }
-                    formatted.push('');
-                    formatted.push('📊 LINE ITEMS:');
-                    formatted.push('─'.repeat(50));
-                    formatted.push(line);
-                    inLineItems = true;
-                } else if (inLineItems && /^\d+($|\.|\s)/.test(line)) {
-                    // This looks like a line item
-                    lineItemCount++;
-                    formatted.push(`  [${lineItemCount}] ${line}`);
-                } else if (line.toUpperCase().includes('TOTAL') || line.toUpperCase().includes('SUBTOTAL') || 
-                          line.toUpperCase().includes('TAX')) {
-                    if (inLineItems) {
-                        formatted.push('─'.repeat(50));
-                        inLineItems = false;
-                    }
-                    formatted.push('');
-                    formatted.push('💰 ' + line);
-                } else {
-                    currentSection.push(line);
                 }
             }
             
-            if (currentSection.length > 0) {
-                formatted.push(currentSection.join('\n'));
+            // Build HTML invoice layout
+            html += '<table class="invoice-layout" style="width: 100%; border-collapse: collapse;">';
+            
+            // Header section
+            html += '<tr><td colspan="4" style="padding: 16px 0; border-bottom: 3px solid #333; font-size: 18px; font-weight: bold;">';
+            html += headerInfo.title || '📄 INVOICE';
+            html += '</td></tr>';
+            
+            // Invoice details - 2 column layout
+            html += '<tr><td colspan="2" style="padding: 12px 0; vertical-align: top;">';
+            if (headerInfo.invoiceNum) html += '<div class="invoice-detail"><strong>Invoice #:</strong> ' + escapeHtml(headerInfo.invoiceNum) + '</div>';
+            if (headerInfo.invoiceDate) html += '<div class="invoice-detail"><strong>Date:</strong> ' + escapeHtml(headerInfo.invoiceDate) + '</div>';
+            html += '</td><td colspan="2" style="padding: 12px 0; text-align: right; vertical-align: top;">';
+            if (headerInfo.vendor) html += '<div class="invoice-detail"><strong>Vendor:</strong> ' + escapeHtml(headerInfo.vendor) + '</div>';
+            if (headerInfo.poNumber) html += '<div class="invoice-detail"><strong>PO #:</strong> ' + escapeHtml(headerInfo.poNumber) + '</div>';
+            html += '</td></tr>';
+            
+            // Line items section
+            if (lineItems.length > 0) {
+                html += '<tr><td colspan="4" style="padding: 20px 0 8px 0; border-top: 2px solid #ddd; border-bottom: 2px solid #ddd; font-weight: bold;">';
+                html += '<table style="width: 100%; border-collapse: collapse;">';
+                html += '<tr style="background: #f5f5f5;">';
+                html += '<td style="padding: 8px; flex: 1; min-width: 40%;">DESCRIPTION</td>';
+                html += '<td style="padding: 8px; text-align: right; width: 15%;">QTY</td>';
+                html += '<td style="padding: 8px; text-align: right; width: 20%;">UNIT PRICE</td>';
+                html += '<td style="padding: 8px; text-align: right; width: 20%;">AMOUNT</td>';
+                html += '</tr>';
+                
+                lineItems.forEach((item, idx) => {
+                    html += '<tr style="border-bottom: 1px solid #eee;">';
+                    html += '<td style="padding: 8px; flex: 1;">' + escapeHtml(item.substring(0, 50)) + '</td>';
+                    html += '<td style="padding: 8px; text-align: right;">-</td>';
+                    html += '<td style="padding: 8px; text-align: right;">-</td>';
+                    html += '<td style="padding: 8px; text-align: right;">-</td>';
+                    html += '</tr>';
+                });
+                
+                html += '</table></td></tr>';
             }
             
-            return formatted.join('\n\n');
+            // Totals section - right aligned
+            html += '<tr><td colspan="4" style="padding: 20px 0 0 0;">';
+            html += '<table style="width: 100%; border-collapse: collapse;">';
+            html += '<tr><td style="width: 60%;"></td><td style="width: 40%; padding: 8px 0;">';
+            html += '<table style="width: 100%; border-collapse: collapse;">';
+            
+            Object.entries(totalsInfo).forEach(([key, val]) => {
+                if (key && val) {
+                    html += '<tr style="border-bottom: 1px solid #ddd;">';
+                    html += '<td style="padding: 8px 12px;">' + escapeHtml(key) + '</td>';
+                    html += '<td style="padding: 8px 12px; text-align: right; font-weight: bold;">' + escapeHtml(val) + '</td>';
+                    html += '</tr>';
+                }
+            });
+            
+            html += '</table>';
+            html += '</td></tr>';
+            html += '</table>';
+            
+            // Footer note
+            if (lines.length > 0) {
+                html += '<div style="padding-top: 20px; border-top: 1px solid #ddd; font-size: 12px; color: #666; margin-top: 20px;">';
+                html += '<p><strong>Full Content:</strong></p>';
+                html += '<pre style="background: #f9f9f9; padding: 12px; border-radius: 4px; overflow-x: auto; font-size: 11px; line-height: 1.5; white-space: pre-wrap; word-break: break-word;">' + escapeHtml(text.substring(0, 500)) + (text.length > 500 ? '\n... (truncated)' : '') + '</pre>';
+                html += '</div>';
+            }
+            
+            html += '</div>';
+            return html;
+        }
+        
+        // Helper to escape HTML
+        function escapeHtml(text) {
+            const map = {
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#039;'
+            };
+            return text.replace(/[&<>"']/g, m => map[m]);
         }
 
         // Display extracted text with better formatting
         function displayExtractedText(text) {
-            const formattedText = formatExtractedText(text);
-            document.getElementById('extracted-text').textContent = formattedText;
+            const formattedHtml = formatExtractedText(text);
+            document.getElementById('extracted-text').innerHTML = formattedHtml;
         }
 
         // Detect fields from OCR

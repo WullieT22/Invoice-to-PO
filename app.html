@@ -139,8 +139,12 @@
                 <!-- Extracted/OCR Text -->
                 <div class="bg-white rounded-lg shadow p-6">
                     <h3 class="text-lg font-bold mb-4">📋 Content</h3>
-                    <div id="extracted-text" class="bg-gray-50 p-4 rounded text-sm max-h-96 overflow-y-auto font-mono whitespace-pre-wrap break-words cursor-text border-2 border-transparent hover:border-blue-200 transition" title="Highlight text to map it"></div>
-                    <p class="text-xs text-gray-500 mt-2">💡 Tip: Highlight text above to automatically map it to a field.</p>
+                    <div id="extracted-text" class="bg-gray-50 p-6 rounded text-base max-h-96 overflow-y-auto border-2 border-gray-300 hover:border-blue-300 transition" 
+                         title="Click to highlight text" 
+                         style="line-height: 1.8; font-family: Arial, sans-serif; white-space: pre-wrap; word-wrap: break-word; user-select: text; cursor: text;">
+                         
+                    </div>
+                    <p class="text-xs text-gray-500 mt-2">💡 Tip: Highlight text to map fields, or draw boxes on the image to select areas.</p>
                 </div>
             </div>
 
@@ -712,7 +716,7 @@ function addImageSelectionOverlay() {
         async function loadText(file) {
             extractedContent = await file.text();
             document.getElementById('preview-container').innerHTML = `<pre class="text-xs overflow-auto">${extractedContent.substring(0, 1000)}</pre>`;
-            document.getElementById('extracted-text').textContent = extractedContent;
+            displayExtractedText(extractedContent);
         }
 
         // Run OCR
@@ -749,8 +753,82 @@ function addImageSelectionOverlay() {
             }
         }
 
+        // Format extracted text for better readability
+        function formatExtractedText(text) {
+            if (!text) return '';
+            
+            // Split into lines and clean up
+            let lines = text.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+            
+            let formatted = [];
+            let currentSection = [];
+            let inLineItems = false;
+            let lineItemCount = 0;
+            
+            for (let line of lines) {
+                // Detect sections
+                if (line.toUpperCase().includes('INVOICE') || line.toUpperCase().includes('BILL')) {
+                    if (currentSection.length > 0) {
+                        formatted.push(currentSection.join('\n'));
+                        currentSection = [];
+                    }
+                    formatted.push('─'.repeat(50));
+                    formatted.push('📄 ' + line.toUpperCase());
+                    formatted.push('─'.repeat(50));
+                    inLineItems = false;
+                } else if (line.toUpperCase().includes('DATE') || line.toUpperCase().includes('AMOUNT') || 
+                          line.toUpperCase().includes('VENDOR') || line.toUpperCase().includes('FROM')) {
+                    if (currentSection.length > 0 && !inLineItems) {
+                        currentSection.push('');
+                    }
+                    currentSection.push('  ' + line);
+                } else if (line.toUpperCase().includes('ITEM') || line.toUpperCase().includes('DESCRIPTION') || 
+                          line.toUpperCase().includes('QTY') || line.toUpperCase().includes('PRICE') ||
+                          line.toUpperCase().includes('LINE')) {
+                    if (currentSection.length > 0) {
+                        formatted.push(currentSection.join('\n'));
+                        currentSection = [];
+                    }
+                    formatted.push('');
+                    formatted.push('📊 LINE ITEMS:');
+                    formatted.push('─'.repeat(50));
+                    formatted.push(line);
+                    inLineItems = true;
+                } else if (inLineItems && /^\d+($|\.|\s)/.test(line)) {
+                    // This looks like a line item
+                    lineItemCount++;
+                    formatted.push(`  [${lineItemCount}] ${line}`);
+                } else if (line.toUpperCase().includes('TOTAL') || line.toUpperCase().includes('SUBTOTAL') || 
+                          line.toUpperCase().includes('TAX')) {
+                    if (inLineItems) {
+                        formatted.push('─'.repeat(50));
+                        inLineItems = false;
+                    }
+                    formatted.push('');
+                    formatted.push('💰 ' + line);
+                } else {
+                    currentSection.push(line);
+                }
+            }
+            
+            if (currentSection.length > 0) {
+                formatted.push(currentSection.join('\n'));
+            }
+            
+            return formatted.join('\n\n');
+        }
+
+        // Display extracted text with better formatting
+        function displayExtractedText(text) {
+            const formattedText = formatExtractedText(text);
+            document.getElementById('extracted-text').textContent = formattedText;
+        }
+
         // Detect fields from OCR
         function detectAndAddMappings(text) {
+            // Display formatted text
+            displayExtractedText(text);
+            
             const patterns = {
                 invoice_number: /(?:invoice|inv|bill|#|no\.?)\s*[#:]?\s*([A-Z0-9\-\/]+)/i,
                 invoice_date: /(?:date|invoice date)\s*[:\-]?\s*(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/i,

@@ -24,6 +24,8 @@
         .progress-bar { width: 100%; height: 8px; background: #E5E7EB; border-radius: 4px; overflow: hidden; }
         .progress-fill { height: 100%; background: linear-gradient(90deg, #3B82F6, #8B5CF6); width: 0%; transition: width 0.3s; }
         .template-tag { display: inline-block; background: #3B82F6; color: white; padding: 4px 8px; border-radius: 4px; font-size: 12px; margin: 2px; }
+        #preview-container img { pointer-events: none; display: block; }
+        #preview-container canvas.selection-canvas { cursor: crosshair !important; }
     </style>
 </head>
 <body class="bg-gradient-to-br from-slate-50 to-slate-100">
@@ -501,6 +503,115 @@
             });
 
             updateMappingsDisplay();
+        }
+
+        // Add canvas overlay for manual selection
+        function addImageSelectionOverlay() {
+            const container = document.getElementById('preview-container');
+            const img = container.querySelector('img');
+            
+            if (!img || currentMode !== 'manual') {
+                console.log('Cannot create overlay - img:', !!img, 'mode:', currentMode);
+                return;
+            }
+            
+            // Remove existing overlay
+            const existing = container.querySelector('canvas.selection-canvas');
+            if (existing) existing.remove();
+            
+            // Ensure container is positioned
+            if (getComputedStyle(container).position === 'static') {
+                container.style.position = 'relative';
+            }
+            
+            // Create canvas
+            const canvas = document.createElement('canvas');
+            canvas.className = 'selection-canvas';
+            canvas.style.cssText = `
+                position: absolute;
+                top: 0;
+                left: 0;
+                cursor: crosshair;
+                z-index: 100;
+                display: block;
+                background: transparent;
+            `;
+            
+            // Size to container
+            const rect = container.getBoundingClientRect();
+            canvas.width = container.offsetWidth;
+            canvas.height = container.offsetHeight;
+            console.log('Canvas created:', canvas.width, 'x', canvas.height);
+            
+            const ctx = canvas.getContext('2d');
+            let isDrawing = false;
+            let startX, startY;
+            let selections = [];
+            const colors = ['#3B82F6', '#EF4444', '#10B981', '#F59E0B', '#8B5CF6', '#EC4899'];
+            
+            const redraw = () => {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                selections.forEach((sel, idx) => {
+                    ctx.strokeStyle = sel.color;
+                    ctx.lineWidth = 2;
+                    ctx.globalAlpha = 0.5;
+                    ctx.strokeRect(sel.x, sel.y, sel.w, sel.h);
+                    
+                    ctx.fillStyle = sel.color;
+                    ctx.font = 'bold 14px Arial';
+                    ctx.globalAlpha = 1;
+                    ctx.fillText(`[${idx + 1}]`, sel.x + 5, sel.y + 20);
+                });
+            };
+            
+            canvas.addEventListener('mousedown', (e) => {
+                isDrawing = true;
+                startX = e.offsetX;
+                startY = e.offsetY;
+                console.log('Draw start:', startX, startY);
+            }, false);
+            
+            canvas.addEventListener('mousemove', (e) => {
+                if (!isDrawing) return;
+                
+                redraw();
+                const currentColor = colors[selections.length % colors.length];
+                
+                const x = Math.min(startX, e.offsetX);
+                const y = Math.min(startY, e.offsetY);
+                const w = Math.abs(e.offsetX - startX);
+                const h = Math.abs(e.offsetY - startY);
+                
+                ctx.strokeStyle = currentColor;
+                ctx.lineWidth = 2;
+                ctx.globalAlpha = 0.8;
+                ctx.strokeRect(x, y, w, h);
+                ctx.fillStyle = currentColor;
+                ctx.globalAlpha = 0.1;
+                ctx.fillRect(x, y, w, h);
+            }, false);
+            
+            canvas.addEventListener('mouseup', (e) => {
+                if (!isDrawing) return;
+                isDrawing = false;
+                
+                const x = Math.min(startX, e.offsetX);
+                const y = Math.min(startY, e.offsetY);
+                const w = Math.abs(e.offsetX - startX);
+                const h = Math.abs(e.offsetY - startY);
+                
+                if (w > 5 && h > 5) {
+                    selections.push({
+                        x, y, w, h,
+                        color: colors[selections.length % colors.length]
+                    });
+                    console.log('Selection added:', {x, y, w, h});
+                }
+                redraw();
+            }, false);
+            
+            container.appendChild(canvas);
+            console.log('Canvas appended to container');
         }
 
         // Add New Mapping
